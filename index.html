@@ -258,6 +258,7 @@ h2{font-size:15px;margin:0 0 10px}
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -265,7 +266,7 @@ h2{font-size:15px;margin:0 0 10px}
 <script>
 "use strict";
 /* ---------------------------------------------------------------- config */
-const APP_VERSION = "v1.3 (14-Nov-2026)";
+const APP_VERSION = "v1.4 (14-Nov-2026)";
 /* No client, location or area names live in this file (it is hosted publicly).
    Each phone remembers what its user typed: clients, their locations, the areas walked, and the firm name. */
 function lsGet(k){ try { return JSON.parse(localStorage.getItem(k) || "null"); } catch(e) { return null; } }
@@ -556,8 +557,56 @@ async function ocrText(canvas, psm){
   const r = await worker.recognize(canvas);
   return { text: (r.data.text || "").trim(), conf: r.data.confidence || 0 };
 }
-/* Read a plate from the guide-box crop. Tries normal and inverted, keeps the best parse. */
+/* ---- fast-plate-ocr XS (main reader since v1.4, 14-Nov-2026): plate-only model, 3.3 MB, runs on the phone
+   with ONNX Runtime Web. Input: RGB 128x64 uint8 (NHWC). Output "plate": 10 slots x 37 classes (softmax). */
+const FPO = { w: 128, h: 64, slots: 10, alphabet: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_", pad: "_" };
+let fpoSession = null, fpoReady = null;
+function getFpo(){
+  if (fpoReady) return fpoReady;
+  fpoReady = (async () => {
+    if (!window.ort) throw new Error("plate reader library did not load");
+    ort.env.wasm.numThreads = 1;
+    setStatus("Getting the plate reader ready (first time about 4 MB)…");
+    fpoSession = await ort.InferenceSession.create(new URL("lang/fpo_xs.onnx", location.href).href, { executionProviders: ["wasm"] });
+    READER = "fast-plate-ocr XS";
+    setStatus("Reader ready (fast-plate-ocr). Point at a plate and tap the white button.");
+    return fpoSession;
+  })().catch(e => { fpoReady = null; throw e; });
+  return fpoReady;
+}
+async function fpoRead(canvas){
+  const s = await getFpo();
+  const c = document.createElement("canvas"); c.width = FPO.w; c.height = FPO.h;
+  const g = c.getContext("2d"); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "medium";
+  g.drawImage(canvas, 0, 0, FPO.w, FPO.h);                       // stretch, no aspect kept (as the model expects)
+  const d = g.getImageData(0, 0, FPO.w, FPO.h).data, u = new Uint8Array(FPO.w * FPO.h * 3);
+  for (let i = 0, j = 0; i < d.length; i += 4) { u[j++] = d[i]; u[j++] = d[i + 1]; u[j++] = d[i + 2]; }
+  const out = await s.run({ [s.inputNames[0]]: new ort.Tensor("uint8", u, [1, FPO.h, FPO.w, 3]) });
+  const p = out.plate || out[s.outputNames[0]], n = FPO.alphabet.length;
+  let text = "", conf = 1;
+  for (let k = 0; k < FPO.slots; k++) {
+    let bi = 0, bv = -1;
+    for (let a = 0; a < n; a++) { const v = p.data[k * n + a]; if (v > bv) { bv = v; bi = a; } }
+    conf = Math.min(conf, bv);
+    if (FPO.alphabet[bi] !== FPO.pad) text += FPO.alphabet[bi];
+  }
+  return { text, conf };
+}
+
+/* Read a plate from the guide-box crop: fast-plate-ocr first; Tesseract only if it cannot load. */
 async function readPlate(crop, lines){
+  try {
+    const r = await fpoRead(crop);
+    const p = Plate.parse(r.text);
+    if (p) { p.conf = Math.round(r.conf * 100); p.text = r.text; return p; }
+    return r.text ? { plate: r.text, raw: r.text, cost: 9, conf: Math.round(r.conf * 100) } : null;
+  } catch (e) {
+    console.warn("fast-plate-ocr unavailable, using Tesseract", e);
+    return readPlateTess(crop, lines);
+  }
+}
+/* Older Tesseract reader (kept as a fallback). Tries normal and inverted, keeps the best parse. */
+async function readPlateTess(crop, lines){
   await getWorker();
   const psm = lines === 2 ? 6 : 7;
   let best = null;
@@ -587,7 +636,7 @@ async function startScan(){
   $("scanTitle").textContent = `${S.location} · PV ${ddmmyyyy(S.pvDate)}`;
   drawAreaBar(); drawGuide(); updateCount();
   keepAwake();
-  getWorker().catch(() => {});
+  getFpo().catch(() => { setStatus("Plate reader didn't load - using the backup reader."); getWorker().catch(() => {}); });
   await startCamera();
 }
 function drawAreaBar(){
