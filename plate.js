@@ -95,6 +95,7 @@
           if (/^0+$/.test(di.text)) cost += 3;              // district 0 / 00 does not exist
           else if (d === 1) cost += st.text === "DL" ? 0.2 : 1.2; // single-digit districts: mostly Delhi
           if (st.text === "DL" && +di.text > 14) cost += 0.5; // Delhi districts run 1-14: tie-break only, ruleProblem() flags it
+          if (/[IO]/.test(se.text)) cost += 1.5;            // series letters never use I or O (they read as 1 / 0)
           if (st.text === "DL" && se.text && se.text[0] !== "C" && l >= 1) cost += 0.6; // Delhi car series start with C
           if (l === 0) cost += 0.8;                         // old plates without series are rare now
           var txt = st.text + di.text + se.text + nu.text;

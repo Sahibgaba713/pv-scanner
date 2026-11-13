@@ -54,7 +54,10 @@ h2{font-size:15px;margin:0 0 10px}
 .areas .chip{background:#2a2f36;color:#fff;flex:0 0 auto}
 .areas .chip.on{background:var(--accent)}
 .cam{position:relative;flex:1;min-height:340px;overflow:hidden;background:#000}
-.cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+.zoombar{position:absolute;left:14px;right:14px;bottom:12px;display:flex;align-items:center;gap:10px;color:#fff;font-weight:700;font-size:14px;background:rgba(0,0,0,.45);border-radius:999px;padding:6px 14px}
+.zoombar input{flex:1;accent-color:var(--accent);padding:0;border:0;background:transparent}
+.zoombar span{min-width:38px}
 .guide{position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);width:82%;aspect-ratio:4.2/1;border:3px solid #fff;border-radius:10px;box-shadow:0 0 0 9999px rgba(0,0,0,.45)}
 .guide.two{aspect-ratio:1.9/1;width:60%}
 .guide-tip{position:absolute;left:0;right:0;top:calc(44% + 70px);text-align:center;font-size:14px;opacity:.9;padding:0 16px}
@@ -148,6 +151,10 @@ h2{font-size:15px;margin:0 0 10px}
     <div class="guide" id="guide"></div>
     <div class="guide-tip" id="guideTip">Fit the number plate inside the box, then tap the white button</div>
     <div class="camerr hidden" id="camErr"></div>
+    <div class="zoombar hidden" id="zoomBar">
+      <span id="zoomVal">1×</span>
+      <input type="range" id="zoom" min="1" max="4" step="0.1" value="1" aria-label="Zoom">
+    </div>
   </div>
   <div class="status" id="ocrStatus">Getting the reader ready…</div>
   <div class="ctrl">
@@ -264,7 +271,7 @@ h2{font-size:15px;margin:0 0 10px}
 <script>
 "use strict";
 /* ---------------------------------------------------------------- config */
-const APP_VERSION = "v1.5 (14-Nov-2026)";
+const APP_VERSION = "v1.6 (14-Nov-2026)";
 /* No client, location or area names live in this file (it is hosted publicly).
    Each phone remembers what its user typed: clients, their locations, the areas walked, and the firm name. */
 function lsGet(k){ try { return JSON.parse(localStorage.getItem(k) || "null"); } catch(e) { return null; } }
@@ -455,14 +462,51 @@ async function startCamera(){
       const caps = track.getCapabilities ? track.getCapabilities() : {};
       $("btnTorch").classList.toggle("hidden", !caps.torch);
       if (caps.focusMode && caps.focusMode.includes("continuous")) track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
-    } catch(e) {}
+      setupZoom(caps);
+    } catch(e) { setupZoom({}); }
     return true;
   } catch (e) {
     return camFallback("Camera permission was not given. Allow the camera for this page in Chrome settings, or tap the white button to take a photo instead.");
   }
 }
-function camFallback(msg){ $("camErr").textContent = msg; $("camErr").classList.remove("hidden"); $("guide").classList.add("hidden"); $("guideTip").classList.add("hidden"); return false; }
-function stopCamera(){ if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; track = null; torchOn = false; releaseWake(); }
+function camFallback(msg){ $("camErr").textContent = msg; $("camErr").classList.remove("hidden"); $("guide").classList.add("hidden"); $("guideTip").classList.add("hidden"); $("zoomBar").classList.add("hidden"); return false; }
+function stopCamera(){ if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; track = null; torchOn = false; zoomDigital = 1; $("video").style.transform = ""; releaseWake(); }
+
+/* ---- zoom (v1.6): the camera's own zoom where the phone allows it (sharper), otherwise digital
+   zoom on screen. With digital zoom grabFrame() still cuts the plate from the full camera frame. */
+let zoomHw = null, zoomDigital = 1, pinch = null;
+function setupZoom(caps){
+  const z = $("zoom");
+  if (caps && caps.zoom && caps.zoom.max > caps.zoom.min) {
+    zoomHw = caps.zoom;
+    z.min = caps.zoom.min; z.max = Math.min(caps.zoom.max, 10); z.step = caps.zoom.step || 0.1;
+    z.value = (track && track.getSettings && track.getSettings().zoom) || caps.zoom.min;
+  } else { zoomHw = null; z.min = 1; z.max = 4; z.step = 0.1; z.value = 1; }
+  zoomDigital = 1; showZoom(+z.value);
+  $("zoomBar").classList.remove("hidden");
+}
+async function setZoom(v){
+  const z = $("zoom"); v = Math.max(+z.min, Math.min(+z.max, v)); z.value = v;
+  if (zoomHw && track) { try { await track.applyConstraints({ advanced: [{ zoom: v }] }); } catch(e) {} zoomDigital = 1; }
+  else zoomDigital = v;
+  showZoom(v);
+}
+function showZoom(v){
+  $("video").style.transform = zoomDigital > 1 ? `scale(${zoomDigital})` : "";
+  $("zoomVal").textContent = (Math.round(v * 10) / 10) + "×";
+}
+$("zoom").addEventListener("input", e => setZoom(+e.target.value));
+// pinch with two fingers on the camera view
+$("cam").addEventListener("touchstart", e => {
+  if (e.touches.length === 2) { const [a, b] = e.touches; pinch = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), v: +$("zoom").value }; }
+}, { passive: true });
+$("cam").addEventListener("touchmove", e => {
+  if (!pinch || e.touches.length !== 2) return;
+  e.preventDefault();
+  const [a, b] = e.touches, d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  setZoom(pinch.v * d / pinch.d);
+}, { passive: false });
+$("cam").addEventListener("touchend", e => { if (e.touches.length < 2) pinch = null; });
 async function keepAwake(){ try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch(e) {} }
 function releaseWake(){ try { wakeLock && wakeLock.release(); } catch(e) {} wakeLock = null; }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && !$("scan").classList.contains("hidden")) keepAwake(); });
@@ -478,7 +522,7 @@ function grabFrame(){
   const full = document.createElement("canvas"); full.width = vw; full.height = vh;
   full.getContext("2d").drawImage(v, 0, 0, vw, vh);
   const cr = $("cam").getBoundingClientRect(), gr = $("guide").getBoundingClientRect();
-  const sc = Math.max(cr.width / vw, cr.height / vh);
+  const sc = Math.max(cr.width / vw, cr.height / vh) * zoomDigital;     // digital zoom enlarges the picture about its centre
   const ox = (vw * sc - cr.width) / 2, oy = (vh * sc - cr.height) / 2;
   const padX = gr.width * 0.06, padY = gr.height * 0.12;           // a little margin around the box
   let x = (gr.left - cr.left - padX + ox) / sc, y = (gr.top - cr.top - padY + oy) / sc;
