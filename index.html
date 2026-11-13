@@ -1,0 +1,821 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14324f">
+<title>Open RO PV Scanner</title>
+<style>
+:root{
+  --bg:#f3f5f8; --card:#ffffff; --ink:#15202b; --muted:#5b6b7b; --line:#d9e0e7;
+  --brand:#14324f; --brand-ink:#ffffff; --accent:#e46a12; --ok:#1d7a46; --ok-bg:#e3f4ea;
+  --warn:#9a5b00; --warn-bg:#fff2d9; --bad:#b3261e; --bad-bg:#fde7e5; --chip:#e8edf3;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f151c; --card:#18212b; --ink:#e7edf3; --muted:#9aa9b8; --line:#2a3644;
+    --brand:#1f4a73; --chip:#243140; --ok-bg:#163525; --warn-bg:#3a2c10; --bad-bg:#3d1a18;
+    --ok:#6fd39b; --warn:#f0b75a; --bad:#ff8a80;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{min-height:100vh;padding-bottom:env(safe-area-inset-bottom)}
+header.bar{background:var(--brand);color:var(--brand-ink);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
+header.bar h1{font-size:17px;margin:0;font-weight:650;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+header.bar .sub{font-size:12px;opacity:.8;display:block;font-weight:400}
+.wrap{max-width:560px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+label{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
+label:first-child{margin-top:0}
+input,select,textarea{width:100%;font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:11px 12px}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:0;border-color:transparent}
+button{font:inherit;border:0;border-radius:10px;padding:13px 16px;cursor:pointer;font-weight:600}
+.btn{background:var(--brand);color:var(--brand-ink);width:100%}
+.btn.accent{background:var(--accent);color:#fff}
+.btn.ghost{background:var(--chip);color:var(--ink)}
+.btn.danger{background:var(--bad-bg);color:var(--bad)}
+.btn:disabled{opacity:.5}
+.row{display:flex;gap:10px}
+.row>*{flex:1}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{background:var(--chip);color:var(--ink);border-radius:999px;padding:8px 12px;font-size:14px;font-weight:500;display:inline-flex;align-items:center;gap:6px}
+.chip.on{background:var(--accent);color:#fff}
+.chip .x{opacity:.6;font-weight:700}
+.hint{font-size:13px;color:var(--muted);margin:8px 0 0}
+.hidden{display:none!important}
+h2{font-size:15px;margin:0 0 10px}
+.mono{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;letter-spacing:.04em}
+
+/* scan screen */
+#scan{background:#000;min-height:100vh;color:#fff;display:flex;flex-direction:column}
+#scan header.bar{background:rgba(0,0,0,.6)}
+.areas{display:flex;gap:8px;overflow-x:auto;padding:10px 12px;background:#111;scrollbar-width:none}
+.areas .chip{background:#2a2f36;color:#fff;flex:0 0 auto}
+.areas .chip.on{background:var(--accent)}
+.cam{position:relative;flex:1;min-height:340px;overflow:hidden;background:#000}
+.cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.guide{position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);width:82%;aspect-ratio:4.2/1;border:3px solid #fff;border-radius:10px;box-shadow:0 0 0 9999px rgba(0,0,0,.45)}
+.guide.two{aspect-ratio:1.9/1;width:60%}
+.guide-tip{position:absolute;left:0;right:0;top:calc(44% + 70px);text-align:center;font-size:14px;opacity:.9;padding:0 16px}
+.guide.two ~ .guide-tip{top:calc(44% + 110px)}
+.camerr{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;font-size:15px}
+.ctrl{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px calc(14px + env(safe-area-inset-bottom));background:#111}
+.shutter{width:76px;height:76px;border-radius:50%;background:#fff;border:6px solid #888;padding:0;flex:0 0 auto}
+.shutter:active{transform:scale(.95)}
+.side{background:#2a2f36;color:#fff;font-size:14px;padding:12px;border-radius:10px;min-width:96px}
+.count{font-size:13px;opacity:.85;text-align:right}
+.status{font-size:12px;padding:6px 16px;background:#111;color:#bbb;min-height:28px}
+
+/* review sheet */
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:20;display:flex;align-items:flex-end;justify-content:center}
+.sheet .panel{background:var(--card);color:var(--ink);width:100%;max-width:560px;border-radius:16px 16px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom));max-height:92vh;overflow:auto}
+.crop{width:100%;border-radius:8px;background:#000;display:block;max-height:130px;object-fit:contain}
+.plate-in{font-size:28px;font-weight:700;text-align:center;text-transform:uppercase;padding:12px}
+.msg{border-radius:8px;padding:10px 12px;font-size:14px;margin-top:10px}
+.msg.ok{background:var(--ok-bg);color:var(--ok)}
+.msg.warn{background:var(--warn-bg);color:var(--warn)}
+.msg.bad{background:var(--bad-bg);color:var(--bad)}
+.msg.info{background:var(--chip);color:var(--muted)}
+.seg{display:flex;background:var(--chip);border-radius:10px;padding:3px}
+.seg button{flex:1;background:transparent;color:var(--ink);padding:9px;font-weight:500;font-size:14px}
+.seg button.on{background:var(--card);box-shadow:0 1px 2px rgba(0,0,0,.15);font-weight:650}
+
+/* list */
+.grp h3{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:16px 0 6px;display:flex;justify-content:space-between}
+.item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--card);border:1px solid var(--line);border-radius:10px;margin-bottom:6px;cursor:pointer}
+.item .p{font-weight:700;flex:1}
+.item .t{font-size:12px;color:var(--muted)}
+.tag{font-size:11px;padding:2px 7px;border-radius:999px;background:var(--chip);color:var(--muted)}
+.tag.m{background:var(--warn-bg);color:var(--warn)}
+.tag.d{background:var(--bad-bg);color:var(--bad)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+.stats b{display:block;font-size:22px}
+.stats span{font-size:12px;color:var(--muted)}
+.photo-big{width:100%;border-radius:8px;display:block}
+.toast{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:#1d7a46;color:#fff;padding:10px 16px;border-radius:999px;font-weight:600;z-index:30;font-size:15px;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+</style>
+</head>
+<body>
+
+<!-- ================= SETUP ================= -->
+<section id="setup">
+  <header class="bar"><h1>Open RO PV Scanner<span class="sub" id="firmSub">Vehicle physical verification</span></h1></header>
+  <div class="wrap">
+    <div id="resumeCard" class="card hidden">
+      <h2>PV in progress</h2>
+      <p id="resumeText" style="margin:0 0 12px"></p>
+      <div class="row">
+        <button class="btn" id="btnResume">Continue</button>
+        <button class="btn ghost" id="btnList0">See list</button>
+      </div>
+    </div>
+
+    <div class="card" id="newCard">
+      <h2 id="newTitle">Start a new PV</h2>
+      <label for="client">Client</label>
+      <select id="client"></select>
+      <input id="clientOther" class="hidden" placeholder="Client name exactly as it should appear in the Excel" style="margin-top:8px">
+      <label for="location">Location</label>
+      <select id="location"></select>
+      <input id="locOther" class="hidden" placeholder="Type the location name" style="margin-top:8px">
+      <label for="firm">Audit firm (top-right of the Excel, optional)</label>
+      <input id="firm" placeholder="Your firm's name">
+      <label for="pvDate">PV date</label>
+      <input id="pvDate" type="date">
+      <label for="by">Your name</label>
+      <input id="by" placeholder="Name of the person scanning" autocomplete="name">
+      <label>Areas you will walk</label>
+      <div class="chips" id="areaChips"></div>
+      <div class="row" style="margin-top:8px">
+        <input id="newArea" placeholder="Add an area, e.g. Basement 2">
+        <button class="btn ghost" id="btnAddArea" style="flex:0 0 auto;width:auto">Add</button>
+      </div>
+      <p class="hint">Tap × to drop an area you won't walk. Areas show as the "Location" column in the Excel. The phone remembers clients, locations and areas for next time.</p>
+      <button class="btn accent" id="btnStart" style="margin-top:16px">Start scanning</button>
+      <p class="hint" id="startWarn"></p>
+    </div>
+    <p class="hint" style="text-align:center">Photos and plate numbers stay on this phone until you download them.</p>
+  </div>
+</section>
+
+<!-- ================= SCAN ================= -->
+<section id="scan" class="hidden">
+  <header class="bar">
+    <h1 id="scanTitle">Scanning</h1>
+    <button class="side" id="btnToList" style="min-width:auto">List</button>
+  </header>
+  <div class="areas" id="areaBar"></div>
+  <div class="cam" id="cam">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="guide" id="guide"></div>
+    <div class="guide-tip" id="guideTip">Fit the number plate inside the box, then tap the white button</div>
+    <div class="camerr hidden" id="camErr"></div>
+  </div>
+  <div class="status" id="ocrStatus">Getting the reader ready…</div>
+  <div class="ctrl">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="side" id="btnLines">1-line plate</button>
+      <button class="side hidden" id="btnTorch">Torch</button>
+    </div>
+    <button class="shutter" id="btnShoot" aria-label="Capture"></button>
+    <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+      <button class="side" id="btnManual">Manual add</button>
+      <div class="count" id="scanCount">0 vehicles</div>
+    </div>
+  </div>
+  <input type="file" id="fileCap" accept="image/*" capture="environment" class="hidden">
+</section>
+
+<!-- ================= LIST ================= -->
+<section id="list" class="hidden">
+  <header class="bar">
+    <h1 id="listTitle">Vehicles found</h1>
+    <button class="side" id="btnBackScan" style="min-width:auto;background:rgba(255,255,255,.15)">Scan</button>
+  </header>
+  <div class="wrap">
+    <div class="card">
+      <div class="stats">
+        <div><b id="stTotal">0</b><span>Vehicles</span></div>
+        <div><b id="stManual">0</b><span>Manual</span></div>
+        <div><b id="stCheck">0</b><span>To check</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Download</h2>
+      <button class="btn accent" id="btnZip">Excel + photos (zip)</button>
+      <button class="btn ghost" id="btnXlsx" style="margin-top:8px">Excel only</button>
+      <p class="hint">Unzip into the location's <b>Data</b> folder of Open RO PV v2 and run the tool as usual. The Excel links each row to its photo.</p>
+      <p class="hint" id="dlInfo"></p>
+    </div>
+    <div id="groups"></div>
+    <div class="card" style="margin-top:16px">
+      <h2>Finish</h2>
+      <p class="hint" style="margin-top:0">Download first. Finishing clears this PV from the phone.</p>
+      <button class="btn danger" id="btnFinish" style="margin-top:10px">Finish and clear this PV</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= REVIEW / EDIT SHEET ================= -->
+<div class="sheet hidden" id="sheet">
+  <div class="panel">
+    <h2 id="sheetTitle">Check the number</h2>
+    <img class="crop" id="cropImg" alt="Plate crop">
+    <label for="plateIn">Vehicle number</label>
+    <input id="plateIn" class="plate-in mono" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="text">
+    <div class="msg info" id="plateMsg">Reading…</div>
+    <label>Entry type</label>
+    <div class="seg" id="typeSeg">
+      <button data-v="Scanned" class="on">Scanned</button>
+      <button data-v="Temporary">Temporary no.</button>
+      <button data-v="No plate">No plate</button>
+      <button data-v="Other">Trade / other</button>
+    </div>
+    <label for="areaSel">Area</label>
+    <select id="areaSel"></select>
+    <div id="extra" class="hidden">
+      <label for="vinIn">VIN / Chassis (optional)</label>
+      <input id="vinIn" class="mono" autocapitalize="characters" spellcheck="false">
+      <label for="remIn">Remark (optional)</label>
+      <input id="remIn" placeholder="e.g. Plate broken, read from rear">
+    </div>
+    <button class="btn ghost" id="btnMore" style="margin-top:10px;padding:9px">+ VIN / remark</button>
+    <img class="photo-big hidden" id="photoBig" alt="Vehicle photo" style="margin-top:10px">
+    <div class="row" style="margin-top:14px">
+      <button class="btn ghost" id="btnCancel">Retake</button>
+      <button class="btn accent" id="btnSave">Save</button>
+    </div>
+    <button class="btn danger hidden" id="btnDelete" style="margin-top:10px">Delete this entry</button>
+  </div>
+</div>
+
+<!-- add an area while scanning -->
+<div class="sheet hidden" id="areaBox">
+  <div class="panel">
+    <h2>Add an area</h2>
+    <input id="areaNew" placeholder="e.g. Basement 2, Washing bay, Outside parking">
+    <div class="row" style="margin-top:14px">
+      <button class="btn ghost" id="areaNo">Cancel</button>
+      <button class="btn accent" id="areaYes">Add and switch to it</button>
+    </div>
+  </div>
+</div>
+
+<!-- confirm dialog (no browser pop-ups) -->
+<div class="sheet hidden" id="confirmBox">
+  <div class="panel">
+    <h2 id="confirmTitle"></h2>
+    <p id="confirmText" style="margin:0 0 14px"></p>
+    <div class="row">
+      <button class="btn ghost" id="confirmNo">Cancel</button>
+      <button class="btn danger" id="confirmYes">Yes</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="plate.js"></script>
+<script>
+"use strict";
+/* ---------------------------------------------------------------- config */
+const APP_VERSION = "v1.1 (13-Nov-2026)";
+/* No client, location or area names live in this file (it is hosted publicly).
+   Each phone remembers what its user typed: clients, their locations, the areas walked, and the firm name. */
+function lsGet(k){ try { return JSON.parse(localStorage.getItem(k) || "null"); } catch(e) { return null; } }
+function lsSet(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {} }
+function areaKey(client, loc){ return `pv_areas|${client}|${loc}`; }
+const KNOWN = lsGet("pv_clients") || {};            // { "Client name": ["Location", ...] }
+function rememberClient(c, loc){ KNOWN[c] = KNOWN[c] || []; if (!KNOWN[c].includes(loc)) KNOWN[c].push(loc); lsSet("pv_clients", KNOWN); }
+const MON = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
+
+/* ---------------------------------------------------------------- helpers */
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, "0");
+function ddmmyyyy(iso){ const [y,m,d] = iso.split("-"); return `${d}-${m}-${y}`; }
+function hhmm(t){ const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function show(id){ ["setup","scan","list"].forEach(s => $(s).classList.toggle("hidden", s !== id)); window.scrollTo(0,0); }
+function toast(t){ const e = document.createElement("div"); e.className = "toast"; e.textContent = t; document.body.appendChild(e); setTimeout(() => e.remove(), 1400); }
+function safe(s){ return String(s).replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
+function ask(title, text, yes = "Yes"){
+  return new Promise(res => {
+    $("confirmTitle").textContent = title; $("confirmText").textContent = text; $("confirmYes").textContent = yes;
+    $("confirmBox").classList.remove("hidden");
+    const done = v => { $("confirmBox").classList.add("hidden"); $("confirmYes").onclick = $("confirmNo").onclick = null; res(v); };
+    $("confirmYes").onclick = () => done(true); $("confirmNo").onclick = () => done(false);
+  });
+}
+
+/* ---------------------------------------------------------------- storage (IndexedDB) */
+let db = null;
+function openDB(){
+  return new Promise(res => {
+    try {
+      const rq = indexedDB.open("openro-pv-scanner", 1);
+      rq.onupgradeneeded = () => {
+        const d = rq.result;
+        d.createObjectStore("meta");
+        d.createObjectStore("rows", { keyPath: "id", autoIncrement: true });
+      };
+      rq.onsuccess = () => { db = rq.result; res(true); };
+      rq.onerror = () => res(false);
+    } catch (e) { res(false); }
+  });
+}
+const mem = { meta: {}, rows: [] , next: 1 };   // fallback when IndexedDB is blocked
+function tx(store, mode, fn){
+  return new Promise((res, rej) => {
+    try { const t = db.transaction(store, mode); const r = fn(t.objectStore(store)); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); }
+    catch (e) { rej(e); }
+  });
+}
+async function getMeta(k){ if (!db) return mem.meta[k]; try { return await tx("meta","readonly", s => s.get(k)); } catch(e){ return mem.meta[k]; } }
+async function setMeta(k, v){ if (!db) { mem.meta[k] = v; return; } try { await tx("meta","readwrite", s => s.put(v, k)); } catch(e){ mem.meta[k] = v; } }
+async function allRows(){
+  if (!db) return mem.rows.slice();
+  try { const r = await tx("rows","readonly", s => s.getAll()); return (r || []).sort((a,b) => a.id - b.id); } catch(e){ return mem.rows.slice(); }
+}
+async function putRow(row){
+  if (!db) { if (!row.id) row.id = mem.next++; const i = mem.rows.findIndex(r => r.id === row.id); i >= 0 ? mem.rows[i] = row : mem.rows.push(row); return row.id; }
+  const id = await tx("rows","readwrite", s => s.put(row)); if (!row.id) row.id = id; return row.id;
+}
+async function delRow(id){ if (!db) { mem.rows = mem.rows.filter(r => r.id !== id); return; } await tx("rows","readwrite", s => s.delete(id)); }
+async function clearAll(){ if (!db) { mem.meta = {}; mem.rows = []; return; } await tx("rows","readwrite", s => s.clear()); await tx("meta","readwrite", s => s.clear()); }
+
+/* ---------------------------------------------------------------- state */
+let S = null;          // session {client, location, pvDate, by, areas[], area, lines}
+let ROWS = [];         // cache of saved rows (without re-reading IDB on every scan)
+
+/* ---------------------------------------------------------------- setup screen */
+let draftAreas = [];
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function fillClients(){
+  const names = Object.keys(KNOWN);
+  $("client").innerHTML = names.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join("")
+    + `<option value="__other">${names.length ? "New client…" : "Type the client name…"}</option>`;
+  const last = lsGet("pv_last"); if (last && KNOWN[last.client]) $("client").value = last.client;
+  fillLocations();
+  if (last && KNOWN[last.client] && KNOWN[last.client].includes(last.location)) { $("location").value = last.location; pickLocation(); }
+}
+function clientName(){ const k = $("client").value; return k === "__other" ? $("clientOther").value.trim() : k; }
+function locName(){ return $("location").value === "__other" ? $("locOther").value.trim() : $("location").value; }
+function fillLocations(){
+  const k = $("client").value, locs = KNOWN[k] || [];
+  $("clientOther").classList.toggle("hidden", k !== "__other");
+  $("location").innerHTML = locs.map(l => `<option>${esc(l)}</option>`).join("") + `<option value="__other">${locs.length ? "New location…" : "Type the location name…"}</option>`;
+  pickLocation();
+}
+function pickLocation(){
+  const l = $("location").value;
+  $("locOther").classList.toggle("hidden", l !== "__other");
+  // the areas this phone used last time for this location
+  draftAreas = ((l !== "__other" && lsGet(areaKey(clientName(), l))) || []).slice();
+  drawAreaChips();
+}
+function drawAreaChips(){
+  $("areaChips").innerHTML = draftAreas.map((a,i) => `<span class="chip">${esc(a)}<span class="x" data-i="${i}" role="button" aria-label="Remove">×</span></span>`).join("")
+    || `<span class="hint">No areas yet. Type each area you will walk in the box below and tap Add (e.g. Workshop, Basement, Parking).</span>`;
+}
+$("areaChips").addEventListener("click", e => { const i = e.target.dataset.i; if (i !== undefined) { draftAreas.splice(+i, 1); drawAreaChips(); } });
+$("btnAddArea").onclick = () => { const v = $("newArea").value.trim(); if (v && !draftAreas.includes(v)) { draftAreas.push(v); drawAreaChips(); } $("newArea").value = ""; };
+$("newArea").addEventListener("keydown", e => { if (e.key === "Enter") $("btnAddArea").click(); });
+$("client").onchange = fillLocations;
+$("location").onchange = pickLocation;
+
+$("btnStart").onclick = async () => {
+  const loc = locName(), cname = clientName();
+  const by = $("by").value.trim();
+  if (!cname) return ($("startWarn").textContent = "Type the client name.");
+  if (!loc) return ($("startWarn").textContent = "Type the location name.");
+  if (!$("pvDate").value) return ($("startWarn").textContent = "Pick the PV date.");
+  if (!by) return ($("startWarn").textContent = "Enter your name.");
+  if (!draftAreas.length) return ($("startWarn").textContent = "Add at least one area.");
+  if (S && ROWS.length) {
+    const ok = await ask("Start a new PV?", `The PV in progress (${S.location}, ${ROWS.length} vehicles) will be cleared from this phone. Download it first if you haven't.`, "Clear and start");
+    if (!ok) return;
+  }
+  await clearAll(); ROWS = [];
+  try { localStorage.setItem("pv_by", by); } catch(e) {}
+  const firm = $("firm").value.trim();
+  lsSet(areaKey(cname, loc), draftAreas); rememberClient(cname, loc); lsSet("pv_last", { client: cname, location: loc }); lsSet("pv_firm", firm);
+  S = { clientName: cname, clientLabel: cname, firm, location: loc, pvDate: $("pvDate").value, by, areas: draftAreas.slice(), area: draftAreas[0], lines: 1, started: Date.now() };
+  await setMeta("session", S);
+  startScan();
+};
+
+async function boot(){
+  await openDB();
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e) {}
+  fillClients();
+  $("firm").value = lsGet("pv_firm") || "";
+  const d = new Date(); $("pvDate").value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  try { $("by").value = localStorage.getItem("pv_by") || ""; } catch(e) {}
+  S = await getMeta("session");
+  ROWS = S ? await allRows() : [];
+  if (S) {
+    $("resumeCard").classList.remove("hidden");
+    $("resumeText").textContent = `${S.clientLabel} · ${S.location} · PV ${ddmmyyyy(S.pvDate)} · ${ROWS.length} vehicles so far`;
+    $("newTitle").textContent = "Or start a different PV";
+  }
+}
+$("btnResume").onclick = () => startScan();
+$("btnList0").onclick = () => openList();
+
+/* ---------------------------------------------------------------- camera */
+let stream = null, track = null, torchOn = false, wakeLock = null;
+async function startCamera(){
+  $("camErr").classList.add("hidden");
+  if (stream) return true;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return camFallback("Live camera isn't available here. Tap the white button to take a photo instead.");
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    $("video").srcObject = stream;
+    await $("video").play().catch(() => {});
+    track = stream.getVideoTracks()[0];
+    try {
+      const caps = track.getCapabilities ? track.getCapabilities() : {};
+      $("btnTorch").classList.toggle("hidden", !caps.torch);
+      if (caps.focusMode && caps.focusMode.includes("continuous")) track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
+    } catch(e) {}
+    return true;
+  } catch (e) {
+    return camFallback("Camera permission was not given. Allow the camera for this page in Chrome settings, or tap the white button to take a photo instead.");
+  }
+}
+function camFallback(msg){ $("camErr").textContent = msg; $("camErr").classList.remove("hidden"); $("guide").classList.add("hidden"); $("guideTip").classList.add("hidden"); return false; }
+function stopCamera(){ if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; track = null; torchOn = false; releaseWake(); }
+async function keepAwake(){ try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch(e) {} }
+function releaseWake(){ try { wakeLock && wakeLock.release(); } catch(e) {} wakeLock = null; }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && !$("scan").classList.contains("hidden")) keepAwake(); });
+
+$("btnTorch").onclick = () => { if (!track) return; torchOn = !torchOn; track.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(() => {}); $("btnTorch").textContent = torchOn ? "Torch off" : "Torch"; };
+$("btnLines").onclick = async () => { S.lines = S.lines === 1 ? 2 : 1; await setMeta("session", S); drawGuide(); };
+function drawGuide(){ $("guide").classList.toggle("two", S.lines === 2); $("btnLines").textContent = S.lines === 2 ? "2-line plate" : "1-line plate"; }
+
+/* Grab the full frame and the part inside the guide box (video uses object-fit: cover). */
+function grabFrame(){
+  const v = $("video"), vw = v.videoWidth, vh = v.videoHeight;
+  if (!vw) return null;
+  const full = document.createElement("canvas"); full.width = vw; full.height = vh;
+  full.getContext("2d").drawImage(v, 0, 0, vw, vh);
+  const cr = $("cam").getBoundingClientRect(), gr = $("guide").getBoundingClientRect();
+  const sc = Math.max(cr.width / vw, cr.height / vh);
+  const ox = (vw * sc - cr.width) / 2, oy = (vh * sc - cr.height) / 2;
+  const padX = gr.width * 0.06, padY = gr.height * 0.12;           // a little margin around the box
+  let x = (gr.left - cr.left - padX + ox) / sc, y = (gr.top - cr.top - padY + oy) / sc;
+  let w = (gr.width + 2 * padX) / sc, h = (gr.height + 2 * padY) / sc;
+  x = Math.max(0, x); y = Math.max(0, y); w = Math.min(vw - x, w); h = Math.min(vh - y, h);
+  const crop = document.createElement("canvas"); crop.width = Math.round(w); crop.height = Math.round(h);
+  crop.getContext("2d").drawImage(full, x, y, w, h, 0, 0, crop.width, crop.height);
+  return { full, crop };
+}
+
+/* ---------------------------------------------------------------- OCR */
+let worker = null, workerReady = null;
+const WL = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+function getWorker(){
+  if (workerReady) return workerReady;
+  workerReady = (async () => {
+    if (!window.Tesseract) throw new Error("Reader library did not load. Check mobile data and reopen the page.");
+    setStatus("Getting the reader ready (first time needs internet, about 10 MB)…");
+    worker = await Tesseract.createWorker("eng", 1, { logger: m => { if (m.status && m.progress < 1 && /load/i.test(m.status)) setStatus(`Loading reader… ${Math.round(m.progress * 100)}%`); } });
+    await worker.setParameters({ tessedit_char_whitelist: WL, tessedit_pageseg_mode: "7" });
+    setStatus("Reader ready. Point at a plate and tap the white button.");
+    return worker;
+  })().catch(e => { workerReady = null; setStatus("Reader not available: " + e.message + " You can still type numbers."); throw e; });
+  return workerReady;
+}
+function setStatus(t){ $("ocrStatus").textContent = t; }
+
+/* grayscale + contrast stretch + Otsu threshold, upscaled; optional invert (white text on green/black plates) */
+function prep(src, invert, targetW){
+  const scale = Math.min(4, Math.max(1, targetW / src.width));
+  const c = document.createElement("canvas"); c.width = Math.round(src.width * scale); c.height = Math.round(src.height * scale);
+  const g = c.getContext("2d"); g.imageSmoothingQuality = "high"; g.drawImage(src, 0, 0, c.width, c.height);
+  const img = g.getImageData(0, 0, c.width, c.height), d = img.data, n = c.width * c.height;
+  const gray = new Uint8ClampedArray(n), hist = new Array(256).fill(0);
+  let lo = 255, hi = 0;
+  for (let i = 0; i < n; i++) { const v = (d[i*4] * 0.299 + d[i*4+1] * 0.587 + d[i*4+2] * 0.114) | 0; gray[i] = v; }
+  // contrast stretch on 2nd-98th percentile
+  const sorted = Array.from(gray).sort((a,b) => a - b); lo = sorted[Math.floor(n * 0.02)]; hi = sorted[Math.floor(n * 0.98)];
+  const span = Math.max(1, hi - lo);
+  for (let i = 0; i < n; i++) { const v = Math.max(0, Math.min(255, ((gray[i] - lo) * 255 / span) | 0)); gray[i] = v; hist[v]++; }
+  // Otsu
+  let sum = 0; for (let t = 0; t < 256; t++) sum += t * hist[t];
+  let sB = 0, wB = 0, best = 0, th = 128;
+  for (let t = 0; t < 256; t++) { wB += hist[t]; if (!wB) continue; const wF = n - wB; if (!wF) break; sB += t * hist[t];
+    const mB = sB / wB, mF = (sum - sB) / wF, between = wB * wF * (mB - mF) * (mB - mF); if (between > best) { best = between; th = t; } }
+  const W = c.width, H = c.height, ink = new Uint8Array(n);
+  for (let i = 0; i < n; i++) { let dark = gray[i] <= th; if (invert) dark = !dark; ink[i] = dark ? 1 : 0; }
+  // Keep only character-like blobs: drop anything touching the edge (background, car body),
+  // the plate frame (very wide or very tall), and specks.
+  const lab = new Int32Array(n), stack = new Int32Array(n);
+  let next = 0;
+  for (let s = 0; s < n; s++) {
+    if (!ink[s] || lab[s]) continue;
+    next++; let sp = 0, cnt = 0, x0 = W, x1 = 0, y0 = H, y1 = 0, edge = false;
+    stack[sp++] = s; lab[s] = next;
+    while (sp) {
+      const p = stack[--sp], x = p % W, y = (p / W) | 0; cnt++;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      if (x === 0 || y === 0 || x === W - 1 || y === H - 1) edge = true;
+      if (x > 0 && ink[p-1] && !lab[p-1]) { lab[p-1] = next; stack[sp++] = p - 1; }
+      if (x < W-1 && ink[p+1] && !lab[p+1]) { lab[p+1] = next; stack[sp++] = p + 1; }
+      if (y > 0 && ink[p-W] && !lab[p-W]) { lab[p-W] = next; stack[sp++] = p - W; }
+      if (y < H-1 && ink[p+W] && !lab[p+W]) { lab[p+W] = next; stack[sp++] = p + W; }
+    }
+    const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+    const keep = !edge && bw < W * 0.3 && bh < H * 0.9 && bh > H * 0.12 && cnt > n * 0.0004;
+    if (!keep) { stack[0] = s; sp = 1; ink[s] = 0;
+      while (sp) { const p = stack[--sp]; const x = p % W;
+        if (x > 0 && ink[p-1] && lab[p-1] === next) { ink[p-1] = 0; stack[sp++] = p - 1; }
+        if (x < W-1 && ink[p+1] && lab[p+1] === next) { ink[p+1] = 0; stack[sp++] = p + 1; }
+        if (p >= W && ink[p-W] && lab[p-W] === next) { ink[p-W] = 0; stack[sp++] = p - W; }
+        if (p + W < n && ink[p+W] && lab[p+W] === next) { ink[p+W] = 0; stack[sp++] = p + W; } } }
+  }
+  for (let i = 0; i < n; i++) { const v = ink[i] ? 0 : 255; d[i*4] = d[i*4+1] = d[i*4+2] = v; d[i*4+3] = 255; }
+  g.putImageData(img, 0, 0);
+  // Straighten: find the tilt where the ink rows are sharpest (projection variance), -15..+15 degrees.
+  const pts = []; const step = Math.max(1, Math.round(Math.sqrt(n / 40000)));
+  for (let y = 0; y < H; y += step) for (let x = 0; x < W; x += step) if (ink[y * W + x]) pts.push(x, y);
+  let bestA = 0, bestV = -1;
+  for (let a = -15; a <= 15; a += 1) {
+    // bins are 2 sampling steps wide, otherwise the sampling grid itself makes 0 degrees look sharpest
+    const r = a * Math.PI / 180, sn = Math.sin(r), cs = Math.cos(r), bw2 = 2 * step, bins = new Float64Array(Math.ceil((H * 2 + W) / bw2) + 2);
+    for (let k = 0; k < pts.length; k += 2) bins[Math.floor((pts[k+1] * cs - pts[k] * sn + W) / bw2)]++;
+    let s = 0, s2 = 0; for (let k = 0; k < bins.length; k++) { s += bins[k]; s2 += bins[k] * bins[k]; }
+    const v = s2 - s * s / bins.length; if (v > bestV) { bestV = v; bestA = a; }
+  }
+  // white margin helps the reader; rotate by -tilt while copying
+  const m = Math.round(H * 0.15), r = -bestA * Math.PI / 180;
+  const RW = Math.ceil(Math.abs(W * Math.cos(r)) + Math.abs(H * Math.sin(r))), RH = Math.ceil(Math.abs(W * Math.sin(r)) + Math.abs(H * Math.cos(r)));
+  const o = document.createElement("canvas"); o.width = RW + 2 * m; o.height = RH + 2 * m;
+  const og = o.getContext("2d"); og.fillStyle = "#fff"; og.fillRect(0, 0, o.width, o.height);
+  og.translate(o.width / 2, o.height / 2); og.rotate(r); og.drawImage(c, -W / 2, -H / 2);
+  o.tilt = bestA;
+  return o;
+}
+async function ocrText(canvas, psm){
+  await worker.setParameters({ tessedit_pageseg_mode: String(psm) });
+  const r = await worker.recognize(canvas);
+  return { text: (r.data.text || "").trim(), conf: r.data.confidence || 0 };
+}
+/* Read a plate from the guide-box crop. Tries normal and inverted, keeps the best parse. */
+async function readPlate(crop, lines){
+  await getWorker();
+  const psm = lines === 2 ? 6 : 7;
+  let best = null;
+  for (const inv of [false, true]) {
+    const r = await ocrText(prep(crop, inv, lines === 2 ? 700 : 1000), psm);
+    const joined = r.text.replace(/\n+/g, " ");
+    const p = Plate.parse(joined);
+    if (p) { p.conf = r.conf; p.text = r.text; if (!best || p.cost < best.cost || (p.cost === best.cost && p.conf > best.conf)) best = p; }
+    if (best && best.cost <= 0.5 && best.conf >= 60) break;   // good enough, skip the inverted pass
+  }
+  return best;
+}
+/* Fallback for a photo taken without the guide box: read the whole picture and look for a plate anywhere. */
+async function readPlateLoose(img){
+  await getWorker();
+  const r = await ocrText(prep(img, false, 1600), 11);
+  const lines = r.text.split(/\n+/).map(s => s.trim()).filter(Boolean);
+  const tries = lines.concat(lines.slice(1).map((l, i) => lines[i] + l));
+  let best = null;
+  for (const t of tries) { const p = Plate.parse(t); if (p && p.plate.length >= 8 && (!best || p.cost < best.cost)) best = p; }
+  return best;
+}
+
+/* ---------------------------------------------------------------- scan flow */
+async function startScan(){
+  show("scan");
+  $("scanTitle").textContent = `${S.location} · PV ${ddmmyyyy(S.pvDate)}`;
+  drawAreaBar(); drawGuide(); updateCount();
+  keepAwake();
+  getWorker().catch(() => {});
+  await startCamera();
+}
+function drawAreaBar(){
+  $("areaBar").innerHTML = S.areas.map(a => `<span class="chip ${a === S.area ? "on" : ""}" data-a="${esc(a)}">${esc(a)} · ${ROWS.filter(r => r.area === a).length}</span>`).join("")
+    + `<span class="chip" data-add="1" style="background:#3b4450">+ Area</span>`;
+}
+$("areaBar").addEventListener("click", async e => {
+  const a = e.target.closest(".chip"); if (!a) return;
+  if (a.dataset.add) { $("areaNew").value = ""; $("areaBox").classList.remove("hidden"); $("areaNew").focus(); return; }
+  S.area = a.dataset.a; await setMeta("session", S); drawAreaBar();
+});
+$("areaNo").onclick = () => $("areaBox").classList.add("hidden");
+$("areaYes").onclick = async () => {
+  const v = $("areaNew").value.trim(); if (!v) return;
+  if (!S.areas.includes(v)) S.areas.push(v);
+  S.area = v; await setMeta("session", S); lsSet(areaKey(S.clientName, S.location), S.areas);
+  $("areaBox").classList.add("hidden"); drawAreaBar();
+};
+$("areaNew").addEventListener("keydown", e => { if (e.key === "Enter") $("areaYes").click(); });
+function updateCount(){ $("scanCount").textContent = `${ROWS.length} vehicle${ROWS.length === 1 ? "" : "s"}`; }
+
+let pending = null;   // {full, crop, id?}
+$("btnShoot").onclick = async () => {
+  if (!stream) { $("fileCap").click(); return; }
+  const f = grabFrame(); if (!f) return;
+  openSheet({ full: f.full, crop: f.crop });
+  try {
+    const p = await readPlate(f.crop, S.lines);
+    if (!pending || pending.full !== f.full) return;          // sheet closed meanwhile
+    fillRead(p);
+  } catch (e) { if (pending) setMsg("bad", "Couldn't read automatically. Type the number."); }
+};
+$("fileCap").onchange = async e => {
+  const file = e.target.files[0]; e.target.value = ""; if (!file) return;
+  const img = await loadImage(file);
+  const full = document.createElement("canvas"); full.width = img.naturalWidth; full.height = img.naturalHeight;
+  full.getContext("2d").drawImage(img, 0, 0);
+  openSheet({ full, crop: full });
+  try { const p = await readPlateLoose(full); if (pending && pending.full === full) fillRead(p); }
+  catch (er) { if (pending) setMsg("bad", "Couldn't read automatically. Type the number."); }
+};
+function loadImage(file){ return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); }); }
+
+$("btnManual").onclick = () => {
+  let full = null;
+  if (stream) { const f = grabFrame(); if (f) full = f.full; }
+  openSheet({ full, crop: null, manual: true });
+  setType("Temporary");
+  setMsg("info", "Type the number as written (temporary, trade or 'NA' for no plate). A photo of the current camera view is kept.");
+  $("plateIn").focus();
+};
+
+/* ---------------------------------------------------------------- review sheet */
+let curType = "Scanned";
+function setType(v){ curType = v; [...$("typeSeg").children].forEach(b => b.classList.toggle("on", b.dataset.v === v)); checkPlate(); }
+$("typeSeg").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setType(b.dataset.v); });
+function setMsg(kind, text){ const m = $("plateMsg"); m.className = "msg " + kind; m.textContent = text; }
+
+function openSheet(p){
+  pending = p;
+  $("sheetTitle").textContent = p.id ? "Edit entry" : "Check the number";
+  $("plateIn").value = p.plate || ""; $("vinIn").value = p.vin || ""; $("remIn").value = p.remark || "";
+  $("extra").classList.toggle("hidden", !(p.vin || p.remark)); $("btnMore").classList.toggle("hidden", !!(p.vin || p.remark));
+  $("areaSel").innerHTML = S.areas.map(a => `<option ${a === (p.area || S.area) ? "selected" : ""}>${a}</option>`).join("");
+  $("btnDelete").classList.toggle("hidden", !p.id);
+  $("btnCancel").textContent = p.id ? "Close" : "Retake";
+  $("btnSave").textContent = "Save";
+  if (p.crop) { $("cropImg").src = p.crop.toDataURL("image/jpeg", 0.8); $("cropImg").classList.remove("hidden"); }
+  else $("cropImg").classList.add("hidden");
+  $("photoBig").classList.add("hidden");
+  if (p.photoBlob) { $("photoBig").src = URL.createObjectURL(p.photoBlob); $("photoBig").classList.remove("hidden"); }
+  curType = p.type || "Scanned"; setType(curType);
+  if (!p.id && !p.manual) setMsg("info", "Reading the plate…");
+  $("sheet").classList.remove("hidden");
+}
+function closeSheet(){ $("sheet").classList.add("hidden"); pending = null; }
+function fillRead(p){
+  if (!p) { setMsg("warn", "Couldn't find a plate in the box. Type it, or Retake closer and straighter."); $("plateIn").focus(); return; }
+  pending.raw = p.raw;
+  $("plateIn").value = p.plate;
+  checkPlate();
+}
+$("plateIn").addEventListener("input", () => { const pos = $("plateIn").selectionStart; $("plateIn").value = $("plateIn").value.toUpperCase().replace(/[^A-Z0-9 ]/g, ""); try { $("plateIn").setSelectionRange(pos, pos); } catch(e) {} checkPlate(); });
+function checkPlate(){
+  if (!pending) return;
+  const v = Plate.clean($("plateIn").value);
+  $("btnSave").textContent = "Save";
+  if (!v) { if ($("plateMsg").textContent !== "Reading the plate…") setMsg("info", "Type the vehicle number."); return; }
+  const dup = ROWS.find(r => r.id !== pending.id && Plate.clean(r.plate) === v);
+  if (dup) { setMsg("bad", `Already saved: ${dup.area} at ${hhmm(dup.time)}. Save only if it really is a second entry.`); $("btnSave").textContent = "Save anyway"; return; }
+  if (curType !== "Scanned") { setMsg("info", `${curType} entry, saved as typed.`); return; }
+  if (Plate.looksLikeReg(v)) setMsg("ok", "Number looks valid. Check it against the plate, then Save.");
+  else setMsg("warn", "Doesn't look like a normal plate number. Fix it, or pick Temporary / Trade above.");
+}
+$("btnMore").onclick = () => { $("extra").classList.remove("hidden"); $("btnMore").classList.add("hidden"); };
+$("btnCancel").onclick = closeSheet;
+
+/* evidence photo: full frame, max 1280 px, caption strip with plate, area, time */
+function evidencePhoto(full, plate, area, time){
+  return new Promise(res => {
+    if (!full) return res(null);
+    const sc = Math.min(1, 1280 / Math.max(full.width, full.height));
+    const w = Math.round(full.width * sc), h = Math.round(full.height * sc), strip = Math.max(30, Math.round(h * 0.06));
+    const c = document.createElement("canvas"); c.width = w; c.height = h + strip;
+    const g = c.getContext("2d"); g.drawImage(full, 0, 0, w, h);
+    g.fillStyle = "#000"; g.fillRect(0, h, w, strip);
+    g.fillStyle = "#fff"; g.font = `600 ${Math.round(strip * 0.5)}px sans-serif`; g.textBaseline = "middle";
+    const d = new Date(time);
+    g.fillText(`${plate}  |  ${S.location} - ${area}  |  ${pad(d.getDate())}-${pad(d.getMonth()+1)}-${d.getFullYear()} ${hhmm(time)}  |  ${S.by}`, 10, h + strip / 2);
+    c.toBlob(b => res(b), "image/jpeg", 0.72);
+  });
+}
+
+$("btnSave").onclick = async () => {
+  if (!pending) return;
+  let plate = $("plateIn").value.toUpperCase().trim().replace(/\s+/g, curType === "Scanned" ? "" : " ");
+  if (curType === "No plate" && !plate) plate = "NO NUMBER PLATE";
+  if (!plate) { setMsg("bad", "Enter the vehicle number first."); return; }
+  const area = $("areaSel").value;
+  $("btnSave").disabled = true;
+  try {
+    let row;
+    if (pending.id) {
+      row = ROWS.find(r => r.id === pending.id);
+      Object.assign(row, { plate, area, type: curType, vin: $("vinIn").value.trim().toUpperCase(), remark: $("remIn").value.trim() });
+    } else {
+      const time = Date.now();
+      row = { plate, area, type: curType, raw: pending.raw || "", vin: $("vinIn").value.trim().toUpperCase(), remark: $("remIn").value.trim(), time,
+              photoBlob: await evidencePhoto(pending.full, plate, area, time) };
+    }
+    await putRow(row);
+    if (!pending.id) ROWS.push(row);
+    S.area = area; await setMeta("session", S);
+    const wasEdit = !!pending.id;
+    closeSheet();
+    if (wasEdit) renderList(); else { drawAreaBar(); updateCount(); toast(`Saved ${plate}`); }
+  } catch (e) {
+    setMsg("bad", "Couldn't save on this phone: " + e.message);
+  } finally { $("btnSave").disabled = false; }
+};
+$("btnDelete").onclick = async () => {
+  if (!pending || !pending.id) return;
+  const id = pending.id;
+  if (!(await ask("Delete this entry?", `${$("plateIn").value} will be removed from the list.`, "Delete"))) return;
+  await delRow(id); ROWS = ROWS.filter(r => r.id !== id); closeSheet(); renderList();
+};
+
+/* ---------------------------------------------------------------- list */
+$("btnToList").onclick = () => openList();
+$("btnBackScan").onclick = () => startScan();
+function openList(){ stopCamera(); show("list"); renderList(); }
+function renderList(){
+  $("listTitle").textContent = `${S.location} · PV ${ddmmyyyy(S.pvDate)}`;
+  const counts = {}; ROWS.forEach(r => { const k = Plate.clean(r.plate); counts[k] = (counts[k] || 0) + 1; });
+  const toCheck = ROWS.filter(r => counts[Plate.clean(r.plate)] > 1 || (r.type === "Scanned" && !Plate.looksLikeReg(r.plate)));
+  $("stTotal").textContent = ROWS.length; $("stManual").textContent = ROWS.filter(r => r.type !== "Scanned").length; $("stCheck").textContent = toCheck.length;
+  const areas = S.areas.concat([...new Set(ROWS.map(r => r.area))].filter(a => !S.areas.includes(a)));
+  $("groups").innerHTML = areas.map(a => {
+    const rs = ROWS.filter(r => r.area === a); if (!rs.length) return "";
+    return `<div class="grp"><h3><span>${a}</span><span>${rs.length}</span></h3>` + rs.map(r => {
+      const dup = counts[Plate.clean(r.plate)] > 1, odd = r.type === "Scanned" && !Plate.looksLikeReg(r.plate);
+      return `<div class="item" data-id="${r.id}"><span class="p mono">${r.plate}</span>
+        ${r.type !== "Scanned" ? `<span class="tag m">${r.type}</span>` : ""}${dup ? `<span class="tag d">Duplicate</span>` : ""}${odd ? `<span class="tag d">Check</span>` : ""}
+        <span class="t">${hhmm(r.time)}</span></div>`;
+    }).join("") + `</div>`;
+  }).join("") || `<p class="hint" style="text-align:center">No vehicles yet.</p>`;
+  const kb = ROWS.reduce((s, r) => s + (r.photoBlob ? r.photoBlob.size : 0), 0) / 1024;
+  $("dlInfo").textContent = ROWS.length ? `${ROWS.filter(r => r.photoBlob).length} photos, about ${kb > 1024 ? (kb / 1024).toFixed(1) + " MB" : Math.round(kb) + " KB"}.` : "";
+}
+$("groups").addEventListener("click", e => {
+  const it = e.target.closest(".item"); if (!it) return;
+  const r = ROWS.find(x => x.id === +it.dataset.id); if (!r) return;
+  openSheet({ ...r, crop: null });
+});
+
+/* ---------------------------------------------------------------- export */
+function photoName(r, i){ return `${i + 1}_${safe(r.plate)}_${safe(r.area)}_${hhmm(r.time).replace(":", "")}.jpg`; }
+function fileStem(){ const [y,m,d] = S.pvDate.split("-"); return `Vehicle found on ${d} ${MON[+m - 1]}'${y.slice(2)} - ${S.location}`; }
+function buildWorkbook(withPhotos){
+  const [y, m] = S.pvDate.split("-");
+  const aoa = [
+    [S.clientName, "", "", S.firm || ""],
+    [`Location: ${S.location}`],
+    [`Period: ${MON[+m - 1][0].toUpperCase() + MON[+m - 1].slice(1)}'${y.slice(2)}`],
+    [],
+    [`Open RO PV ${S.location} ${ddmmyyyy(S.pvDate)}`],
+    [],
+    ["#", "Location", "Vehicle No", "VIN", "Entry", "Time", "Photo", "Remarks", "Read by scanner"]
+  ];
+  const HEAD = aoa.length;
+  ROWS.forEach((r, i) => aoa.push([i + 1, r.area, r.plate, r.vin || "-", r.type, hhmm(r.time), withPhotos && r.photoBlob ? photoName(r, i) : "", r.remark || "", r.raw || ""]));
+  aoa.push([]);
+  aoa.push([`Scanned by ${S.by} with Open RO PV Scanner ${APP_VERSION}. ${ROWS.length} vehicles.`]);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  if (withPhotos) ROWS.forEach((r, i) => {
+    if (!r.photoBlob) return;
+    const ref = XLSX.utils.encode_cell({ r: HEAD + i, c: 6 });
+    ws[ref].l = { Target: "Photos/" + photoName(r, i), Tooltip: "Open photo" };
+  });
+  ws["!cols"] = [{ wch: 5 }, { wch: 22 }, { wch: 16 }, { wch: 20 }, { wch: 11 }, { wch: 7 }, { wch: 34 }, { wch: 26 }, { wch: 16 }];
+  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Vehicle found");
+  return XLSX.write(wb, { bookType: "xlsx", type: "array" });
+}
+function download(blob, name){
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
+$("btnXlsx").onclick = () => {
+  if (!ROWS.length) return toast("Nothing to download yet");
+  download(new Blob([buildWorkbook(false)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), fileStem() + ".xlsx");
+};
+$("btnZip").onclick = async () => {
+  if (!ROWS.length) return toast("Nothing to download yet");
+  $("btnZip").disabled = true; $("btnZip").textContent = "Preparing…";
+  try {
+    const zip = new JSZip();
+    zip.file(fileStem() + ".xlsx", buildWorkbook(true));
+    const ph = zip.folder("Photos");
+    ROWS.forEach((r, i) => { if (r.photoBlob) ph.file(photoName(r, i), r.photoBlob); });
+    const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+    download(blob, `Open RO PV ${S.location} ${ddmmyyyy(S.pvDate)}.zip`);
+    await setMeta("downloadedAt", Date.now());
+  } catch (e) { toast("Download failed: " + e.message); }
+  finally { $("btnZip").disabled = false; $("btnZip").textContent = "Excel + photos (zip)"; }
+};
+$("btnFinish").onclick = async () => {
+  const dl = await getMeta("downloadedAt");
+  const txt = dl ? `Last zip download at ${hhmm(dl)}. Everything for this PV will be removed from the phone.` : "You haven't downloaded the zip yet. Everything for this PV will be removed from the phone.";
+  if (!(await ask("Finish this PV?", txt, "Finish and clear"))) return;
+  await clearAll(); ROWS = []; S = null; location.reload();
+};
+
+/* test hook: run the reader on an image URL (used for desktop testing only) */
+window.__ocrTest = async (url, lines = 1) => {
+  const img = await new Promise((res, rej) => { const i = new Image(); i.crossOrigin = "anonymous"; i.onload = () => res(i); i.onerror = rej; i.src = url; });
+  const c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext("2d").drawImage(img, 0, 0);
+  const p = await readPlate(c, lines); return p && { plate: p.plate, raw: p.raw, cost: p.cost, conf: p.conf };
+};
+
+boot();
+</script>
+</body>
+</html>
