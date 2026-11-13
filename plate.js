@@ -44,9 +44,19 @@
     return { text: out, cost: cost };
   }
 
-  // State code: try every look-alike (0 can be O or D) and prefer a real state.
-  var STATE_ALT = { "0": ["D", "O", "Q"], "1": ["I"], "2": ["Z"], "4": ["A"], "5": ["S"], "6": ["G"],
-                    "7": ["T"], "8": ["B"], "3": ["B"], "9": ["P"], O: ["D"], Q: ["D"], U: ["J", "D"] };
+  /* State code (first two letters): the reader can only be right if it is a REAL state code.
+     Try every look-alike - digit/letter (0 -> D) and letter/letter (W -> H, F -> D) - and keep
+     the closest real code. Sahib 14-Nov: "WR" or "FL" can never be right; HR / DL can. */
+  var STATE_ALT = {
+    "0": ["D", "O", "Q"], "1": ["I", "J"], "2": ["Z"], "3": ["B"], "4": ["A"], "5": ["S"], "6": ["G"],
+    "7": ["T"], "8": ["B"], "9": ["P"],
+    O: ["D", "Q"], Q: ["D", "O"], U: ["J", "D", "V"], J: ["D", "U"], I: ["L", "J"],
+    W: ["H", "M", "N"], M: ["H", "N", "W"], N: ["H", "M"], H: ["N", "M", "K"], K: ["X", "H"], X: ["K"],
+    F: ["D", "P", "E"], E: ["F", "B"], P: ["D", "B", "R"], B: ["D", "P", "R"], R: ["B", "P"],
+    T: ["J"], C: ["G"], G: ["C"], V: ["U", "Y"], Y: ["V"], L: ["I"]
+  };
+  // tie-break between real codes: the states seen most in the PVs win
+  var STATE_PRIOR = { DL: 0, HR: 0.02, UP: 0.04, PB: 0.06, CH: 0.06, HP: 0.08, RJ: 0.08 };
   function asState(seg) {
     var opts = [{ text: "", cost: 0 }];
     for (var i = 0; i < seg.length; i++) {
@@ -59,8 +69,9 @@
     }
     var best = null;
     opts.forEach(function (o) {
-      var c = o.cost + (STATES.indexOf(o.text) < 0 ? 0 : -0.01);
-      if (STATES.indexOf(o.text) >= 0 && (!best || c < best.c)) best = { text: o.text, cost: o.cost, c: c };
+      if (STATES.indexOf(o.text) < 0) return;
+      var c = o.cost + (o.text in STATE_PRIOR ? STATE_PRIOR[o.text] : 0.1);
+      if (!best || c < best.c) best = { text: o.text, cost: o.cost, c: c };
     });
     if (best) return { text: best.text, cost: best.cost };
     var plain = asLetters(seg);
@@ -83,6 +94,8 @@
           if (n < 4) cost += (4 - n) * 1.5;                 // almost all plates have 4 digits
           if (/^0+$/.test(di.text)) cost += 3;              // district 0 / 00 does not exist
           else if (d === 1) cost += st.text === "DL" ? 0.2 : 1.2; // single-digit districts: mostly Delhi
+          if (st.text === "DL" && +di.text > 14) cost += 0.5; // Delhi districts run 1-14: tie-break only, ruleProblem() flags it
+          if (st.text === "DL" && se.text && se.text[0] !== "C" && l >= 1) cost += 0.6; // Delhi car series start with C
           if (l === 0) cost += 0.8;                         // old plates without series are rare now
           var txt = st.text + di.text + se.text + nu.text;
           if (!best || cost < best.cost) best = { plate: txt, cost: cost, kind: "standard" };
@@ -140,8 +153,20 @@
     return ["", "NAN", "NONE", "REGNO", "NA", "NAT"].indexOf(s) >= 0 ? null : s;
   }
   function looksLikeReg(v) { return REG_SHAPE.test(clean(v)); }
+  /* Problem with a plate-shaped number that the shape test alone misses, or "" if none:
+     a state code that does not exist (WR, FL), or a Delhi district above 14. */
+  function ruleProblem(v) {
+    var s = clean(v);
+    if (/^\d{2}BH/.test(s) || /^T\d{4}/.test(s) || !REG_SHAPE.test(s)) return "";
+    var st = s.substr(0, 2);
+    if (STATES.indexOf(st) < 0) return "State code " + st + " doesn't exist. Check the first two letters (HR, DL, UP...).";
+    var m = s.match(/^DL(\d{1,2})/);
+    if (m && +m[1] > 14) return "Delhi districts go up to 14 (DL " + m[1] + " is unusual). Check the plate.";
+    return "";
+  }
 
-  var api = { parse: parse, clean: clean, norm: norm, looksLikeReg: looksLikeReg, REG_SHAPE: REG_SHAPE };
+  var api = { parse: parse, clean: clean, norm: norm, looksLikeReg: looksLikeReg, ruleProblem: ruleProblem,
+              STATES: STATES, REG_SHAPE: REG_SHAPE };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.Plate = api;
 })(this);

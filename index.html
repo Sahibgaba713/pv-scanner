@@ -265,7 +265,7 @@ h2{font-size:15px;margin:0 0 10px}
 <script>
 "use strict";
 /* ---------------------------------------------------------------- config */
-const APP_VERSION = "v1.2 (13-Nov-2026)";
+const APP_VERSION = "v1.3 (14-Nov-2026)";
 /* No client, location or area names live in this file (it is hosted publicly).
    Each phone remembers what its user typed: clients, their locations, the areas walked, and the firm name. */
 function lsGet(k){ try { return JSON.parse(localStorage.getItem(k) || "null"); } catch(e) { return null; } }
@@ -457,16 +457,26 @@ function grabFrame(){
 }
 
 /* ---------------------------------------------------------------- OCR */
-let worker = null, workerReady = null;
+let worker = null, workerReady = null, READER = "";
 const WL = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 function getWorker(){
   if (workerReady) return workerReady;
   workerReady = (async () => {
     if (!window.Tesseract) throw new Error("Reader library did not load. Check mobile data and reopen the page.");
-    setStatus("Getting the reader ready (first time needs internet, about 10 MB)…");
-    worker = await Tesseract.createWorker("eng", 1, { logger: m => { if (m.status && m.progress < 1 && /load/i.test(m.status)) setStatus(`Loading reader… ${Math.round(m.progress * 100)}%`); } });
+    setStatus("Getting the reader ready (first time needs internet, a few MB)…");
+    const logger = m => { if (m.status && m.progress < 1 && /load/i.test(m.status)) setStatus(`Loading reader… ${Math.round(m.progress * 100)}%`); };
+    // Number-plate model trained 14-Nov-2026 (lang/plate.traineddata, 1.5 MB). If it cannot load, fall back to English.
+    try {
+      const base = new URL("lang/", location.href).href;
+      worker = await Tesseract.createWorker("plate", 1, { langPath: base, gzip: false, logger });
+      READER = "plate model";
+    } catch (e) {
+      console.warn("plate model failed, using English", e);
+      worker = await Tesseract.createWorker("eng", 1, { logger });
+      READER = "English model";
+    }
     await worker.setParameters({ tessedit_char_whitelist: WL, tessedit_pageseg_mode: "7" });
-    setStatus("Reader ready. Point at a plate and tap the white button.");
+    setStatus(`Reader ready (${READER}). Point at a plate and tap the white button.`);
     return worker;
   })().catch(e => { workerReady = null; setStatus("Reader not available: " + e.message + " You can still type numbers."); throw e; });
   return workerReady;
@@ -669,7 +679,9 @@ function checkPlate(){
   const dup = ROWS.find(r => r.id !== pending.id && Plate.clean(r.plate) === v);
   if (dup) { setMsg("bad", `Already saved: ${dup.area} at ${hhmm(dup.time)}. Save only if it really is a second entry.`); $("btnSave").textContent = "Save anyway"; return; }
   if (curType !== "Scanned") { setMsg("info", `${curType} entry, saved as typed.`); return; }
-  if (Plate.looksLikeReg(v)) setMsg("ok", "Number looks valid. Check it against the plate, then Save.");
+  const rule = Plate.ruleProblem ? Plate.ruleProblem(v) : "";
+  if (Plate.looksLikeReg(v) && rule) setMsg("bad", rule);
+  else if (Plate.looksLikeReg(v)) setMsg("ok", "Number looks valid. Check it against the plate, then Save.");
   else setMsg("warn", "Doesn't look like a normal plate number. Fix it, or pick Temporary / Trade above.");
 }
 $("btnMore").onclick = () => { $("extra").classList.remove("hidden"); $("btnMore").classList.add("hidden"); };
@@ -733,7 +745,8 @@ function renderList(){
   $("listTitle").innerHTML = `Review and finish<span class="sub">${esc(S.location)} · PV ${ddmmyyyy(S.pvDate)}</span>`;
   showDownloaded();
   const counts = {}; ROWS.forEach(r => { const k = Plate.clean(r.plate); counts[k] = (counts[k] || 0) + 1; });
-  const toCheck = ROWS.filter(r => counts[Plate.clean(r.plate)] > 1 || (r.type === "Scanned" && !Plate.looksLikeReg(r.plate)));
+  const bad = r => r.type === "Scanned" && (!Plate.looksLikeReg(r.plate) || (Plate.ruleProblem && Plate.ruleProblem(r.plate)));
+  const toCheck = ROWS.filter(r => counts[Plate.clean(r.plate)] > 1 || bad(r));
   $("stTotal").textContent = ROWS.length; $("stManual").textContent = ROWS.filter(r => r.type !== "Scanned").length; $("stCheck").textContent = toCheck.length;
   $("checkHint").textContent = toCheck.length
     ? `${toCheck.length} entr${toCheck.length === 1 ? "y is" : "ies are"} marked Check or Duplicate below. Tap each to fix it, then download.`
@@ -742,7 +755,7 @@ function renderList(){
   $("groups").innerHTML = areas.map(a => {
     const rs = ROWS.filter(r => r.area === a); if (!rs.length) return "";
     return `<div class="grp"><h3><span>${a}</span><span>${rs.length}</span></h3>` + rs.map(r => {
-      const dup = counts[Plate.clean(r.plate)] > 1, odd = r.type === "Scanned" && !Plate.looksLikeReg(r.plate);
+      const dup = counts[Plate.clean(r.plate)] > 1, odd = bad(r);
       return `<div class="item" data-id="${r.id}"><span class="p mono">${r.plate}</span>
         ${r.type !== "Scanned" ? `<span class="tag m">${r.type}</span>` : ""}${dup ? `<span class="tag d">Duplicate</span>` : ""}${odd ? `<span class="tag d">Check</span>` : ""}
         <span class="t">${hhmm(r.time)}</span></div>`;
@@ -774,7 +787,7 @@ function buildWorkbook(withPhotos){
   const HEAD = aoa.length;
   ROWS.forEach((r, i) => aoa.push([i + 1, r.area, r.plate, r.vin || "-", r.type, hhmm(r.time), withPhotos && r.photoBlob ? photoName(r, i) : "", r.remark || "", r.raw || ""]));
   aoa.push([]);
-  aoa.push([`Scanned by ${S.by} with Open RO PV Scanner ${APP_VERSION}. ${ROWS.length} vehicles.`]);
+  aoa.push([`Scanned by ${S.by} with Open RO PV Scanner ${APP_VERSION}${READER ? " (" + READER + ")" : ""}. ${ROWS.length} vehicles.`]);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   if (withPhotos) ROWS.forEach((r, i) => {
     if (!r.photoBlob) return;
