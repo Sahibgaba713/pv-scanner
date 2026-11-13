@@ -102,13 +102,9 @@ h2{font-size:15px;margin:0 0 10px}
 <section id="setup">
   <header class="bar"><h1>Open RO PV Scanner<span class="sub" id="firmSub">Vehicle physical verification</span></h1></header>
   <div class="wrap">
-    <div id="resumeCard" class="card hidden">
-      <h2>PV in progress</h2>
-      <p id="resumeText" style="margin:0 0 12px"></p>
-      <div class="row">
-        <button class="btn" id="btnResume">Continue</button>
-        <button class="btn ghost" id="btnList0">See list</button>
-      </div>
+    <div id="pvListCard" class="hidden">
+      <h2 style="margin:4px 0 10px">PVs on this phone</h2>
+      <div id="pvList"></div>
     </div>
 
     <div class="card" id="newCard">
@@ -142,6 +138,7 @@ h2{font-size:15px;margin:0 0 10px}
 <!-- ================= SCAN ================= -->
 <section id="scan" class="hidden">
   <header class="bar">
+    <button class="side" id="btnHome1" style="min-width:auto;background:rgba(255,255,255,.15)" aria-label="Home">⌂ Home</button>
     <h1 id="scanTitle">Scanning</h1>
     <button class="side" id="btnToList" style="min-width:auto;background:var(--accent);font-weight:700">Finish ✓</button>
   </header>
@@ -170,6 +167,7 @@ h2{font-size:15px;margin:0 0 10px}
 <!-- ================= REVIEW AND FINISH ================= -->
 <section id="list" class="hidden">
   <header class="bar">
+    <button class="side" id="btnHome2" style="min-width:auto;background:rgba(255,255,255,.15)" aria-label="Home">⌂ Home</button>
     <h1 id="listTitle">Review and finish</h1>
     <button class="side" id="btnBackScan" style="min-width:auto;background:rgba(255,255,255,.15)">‹ Scan more</button>
   </header>
@@ -266,7 +264,7 @@ h2{font-size:15px;margin:0 0 10px}
 <script>
 "use strict";
 /* ---------------------------------------------------------------- config */
-const APP_VERSION = "v1.4 (14-Nov-2026)";
+const APP_VERSION = "v1.5 (14-Nov-2026)";
 /* No client, location or area names live in this file (it is hosted publicly).
    Each phone remembers what its user typed: clients, their locations, the areas walked, and the firm name. */
 function lsGet(k){ try { return JSON.parse(localStorage.getItem(k) || "null"); } catch(e) { return null; } }
@@ -318,10 +316,12 @@ function tx(store, mode, fn){
 }
 async function getMeta(k){ if (!db) return mem.meta[k]; try { return await tx("meta","readonly", s => s.get(k)); } catch(e){ return mem.meta[k]; } }
 async function setMeta(k, v){ if (!db) { mem.meta[k] = v; return; } try { await tx("meta","readwrite", s => s.put(v, k)); } catch(e){ mem.meta[k] = v; } }
-async function allRows(){
+async function everyRow(){
   if (!db) return mem.rows.slice();
   try { const r = await tx("rows","readonly", s => s.getAll()); return (r || []).sort((a,b) => a.id - b.id); } catch(e){ return mem.rows.slice(); }
 }
+// rows of one PV (several PVs can be kept on the phone since v1.5)
+async function allRows(pvId){ const r = await everyRow(); return pvId == null ? r : r.filter(x => x.pv === pvId); }
 async function putRow(row){
   if (!db) { if (!row.id) row.id = mem.next++; const i = mem.rows.findIndex(r => r.id === row.id); i >= 0 ? mem.rows[i] = row : mem.rows.push(row); return row.id; }
   const id = await tx("rows","readwrite", s => s.put(row)); if (!row.id) row.id = id; return row.id;
@@ -330,8 +330,35 @@ async function delRow(id){ if (!db) { mem.rows = mem.rows.filter(r => r.id !== i
 async function clearAll(){ if (!db) { mem.meta = {}; mem.rows = []; return; } await tx("rows","readwrite", s => s.clear()); await tx("meta","readwrite", s => s.clear()); }
 
 /* ---------------------------------------------------------------- state */
-let S = null;          // session {client, location, pvDate, by, areas[], area, lines}
-let ROWS = [];         // cache of saved rows (without re-reading IDB on every scan)
+let S = null;          // the open PV {id, client, location, pvDate, by, areas[], area, lines, dl}
+let ROWS = [];         // cache of the open PV's rows (without re-reading IDB on every scan)
+let PVS = [];          // every PV kept on this phone
+async function saveS(){
+  if (!S) return;
+  const i = PVS.findIndex(p => p.id === S.id); i >= 0 ? PVS[i] = S : PVS.push(S);
+  await setMeta("pvs", PVS); await setMeta("current", S.id);
+}
+async function openPv(id){
+  S = PVS.find(p => p.id === id) || null;
+  ROWS = S ? await allRows(S.id) : [];
+  if (S) await setMeta("current", S.id);
+}
+async function goHome(){ stopCamera(); fillClients(); $("startWarn").textContent = ""; await renderHome(); show("setup"); }
+async function renderHome(){
+  const all = await everyRow(), count = {};
+  all.forEach(r => { count[r.pv] = (count[r.pv] || 0) + 1; });
+  $("pvListCard").classList.toggle("hidden", !PVS.length);
+  $("newTitle").textContent = PVS.length ? "Start another PV" : "Start a new PV";
+  $("pvList").innerHTML = PVS.slice().sort((a, b) => b.started - a.started).map(p => `
+    <div class="card" style="margin-bottom:10px">
+      <div style="font-weight:650">${esc(p.location)} · PV ${ddmmyyyy(p.pvDate)}</div>
+      <div class="hint" style="margin:2px 0 10px">${esc(p.clientLabel || p.clientName)} · ${count[p.id] || 0} vehicles · by ${esc(p.by)}${p.dl && p.dl.at ? " · downloaded " + hhmm(p.dl.at) : ""}</div>
+      <div class="row">
+        <button class="btn" data-go="scan" data-id="${p.id}">Continue scanning</button>
+        <button class="btn ghost" data-go="list" data-id="${p.id}">Review and finish</button>
+      </div>
+    </div>`).join("");
+}
 
 /* ---------------------------------------------------------------- setup screen */
 let draftAreas = [];
@@ -377,18 +404,22 @@ $("btnStart").onclick = async () => {
   if (!$("pvDate").value) return ($("startWarn").textContent = "Pick the PV date.");
   if (!by) return ($("startWarn").textContent = "Enter your name.");
   if (!draftAreas.length) return ($("startWarn").textContent = "Add at least one area.");
-  if (S && ROWS.length) {
-    const ok = await ask("Start a new PV?", `The PV in progress (${S.location}, ${ROWS.length} vehicles) will be cleared from this phone. Download it first if you haven't.`, "Clear and start");
-    if (!ok) return;
-  }
-  await clearAll(); ROWS = [];
+  // v1.5: a new PV no longer clears the others - they stay on the home page until finished
   try { localStorage.setItem("pv_by", by); } catch(e) {}
   const firm = $("firm").value.trim();
   lsSet(areaKey(cname, loc), draftAreas); rememberClient(cname, loc); lsSet("pv_last", { client: cname, location: loc }); lsSet("pv_firm", firm);
-  S = { clientName: cname, clientLabel: cname, firm, location: loc, pvDate: $("pvDate").value, by, areas: draftAreas.slice(), area: draftAreas[0], lines: 1, started: Date.now() };
-  await setMeta("session", S);
+  S = { id: Date.now(), clientName: cname, clientLabel: cname, firm, location: loc, pvDate: $("pvDate").value, by, areas: draftAreas.slice(), area: draftAreas[0], lines: 1, started: Date.now() };
+  ROWS = [];
+  await saveS();
   startScan();
 };
+$("pvList").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-go]"); if (!b) return;
+  await openPv(+b.dataset.id); if (!S) return;
+  b.dataset.go === "scan" ? startScan() : openList();
+});
+$("btnHome1").onclick = () => goHome();
+$("btnHome2").onclick = () => goHome();
 
 async function boot(){
   await openDB();
@@ -397,16 +428,17 @@ async function boot(){
   $("firm").value = lsGet("pv_firm") || "";
   const d = new Date(); $("pvDate").value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   try { $("by").value = localStorage.getItem("pv_by") || ""; } catch(e) {}
-  S = await getMeta("session");
-  ROWS = S ? await allRows() : [];
-  if (S) {
-    $("resumeCard").classList.remove("hidden");
-    $("resumeText").textContent = `${S.clientLabel} · ${S.location} · PV ${ddmmyyyy(S.pvDate)} · ${ROWS.length} vehicles so far`;
-    $("newTitle").textContent = "Or start a different PV";
+  PVS = (await getMeta("pvs")) || [];
+  // move a PV started on v1.4 or earlier (single "session") into the new list, with its rows
+  const old = await getMeta("session");
+  if (old && !PVS.length) {
+    old.id = old.started || Date.now(); PVS = [old];
+    for (const r of await everyRow()) if (r.pv == null) { r.pv = old.id; await putRow(r); }
+    await setMeta("pvs", PVS); await setMeta("current", old.id);
   }
+  if (old) { try { await tx("meta","readwrite", s => s.delete("session")); } catch(e) {} }
+  await renderHome();
 }
-$("btnResume").onclick = () => startScan();
-$("btnList0").onclick = () => openList();
 
 /* ---------------------------------------------------------------- camera */
 let stream = null, track = null, torchOn = false, wakeLock = null;
@@ -436,7 +468,7 @@ function releaseWake(){ try { wakeLock && wakeLock.release(); } catch(e) {} wake
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && !$("scan").classList.contains("hidden")) keepAwake(); });
 
 $("btnTorch").onclick = () => { if (!track) return; torchOn = !torchOn; track.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(() => {}); $("btnTorch").textContent = torchOn ? "Torch off" : "Torch"; };
-$("btnLines").onclick = async () => { S.lines = S.lines === 1 ? 2 : 1; await setMeta("session", S); drawGuide(); };
+$("btnLines").onclick = async () => { S.lines = S.lines === 1 ? 2 : 1; await saveS(); drawGuide(); };
 function drawGuide(){ $("guide").classList.toggle("two", S.lines === 2); $("btnLines").textContent = S.lines === 2 ? "2-line plate" : "1-line plate"; }
 
 /* Grab the full frame and the part inside the guide box (video uses object-fit: cover). */
@@ -646,13 +678,13 @@ function drawAreaBar(){
 $("areaBar").addEventListener("click", async e => {
   const a = e.target.closest(".chip"); if (!a) return;
   if (a.dataset.add) { $("areaNew").value = ""; $("areaBox").classList.remove("hidden"); $("areaNew").focus(); return; }
-  S.area = a.dataset.a; await setMeta("session", S); drawAreaBar();
+  S.area = a.dataset.a; await saveS(); drawAreaBar();
 });
 $("areaNo").onclick = () => $("areaBox").classList.add("hidden");
 $("areaYes").onclick = async () => {
   const v = $("areaNew").value.trim(); if (!v) return;
   if (!S.areas.includes(v)) S.areas.push(v);
-  S.area = v; await setMeta("session", S); lsSet(areaKey(S.clientName, S.location), S.areas);
+  S.area = v; await saveS(); lsSet(areaKey(S.clientName, S.location), S.areas);
   $("areaBox").classList.add("hidden"); drawAreaBar();
 };
 $("areaNew").addEventListener("keydown", e => { if (e.key === "Enter") $("areaYes").click(); });
@@ -766,12 +798,12 @@ $("btnSave").onclick = async () => {
       Object.assign(row, { plate, area, type: curType, vin: $("vinIn").value.trim().toUpperCase(), remark: $("remIn").value.trim() });
     } else {
       const time = Date.now();
-      row = { plate, area, type: curType, raw: pending.raw || "", vin: $("vinIn").value.trim().toUpperCase(), remark: $("remIn").value.trim(), time,
+      row = { pv: S.id, plate, area, type: curType, raw: pending.raw || "", vin: $("vinIn").value.trim().toUpperCase(), remark: $("remIn").value.trim(), time,
               photoBlob: await evidencePhoto(pending.full, plate, area, time) };
     }
     await putRow(row);
     if (!pending.id) ROWS.push(row);
-    S.area = area; await setMeta("session", S);
+    S.area = area; await saveS();
     const wasEdit = !!pending.id;
     closeSheet();
     if (wasEdit) renderList(); else { drawAreaBar(); updateCount(); toast(`Saved ${plate}`); }
@@ -867,13 +899,13 @@ $("btnZip").onclick = async () => {
     ROWS.forEach((r, i) => { if (r.photoBlob) ph.file(photoName(r, i), r.photoBlob); });
     const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
     download(blob, `Open RO PV ${S.location} ${ddmmyyyy(S.pvDate)}.zip`);
-    await setMeta("downloadedAt", { at: Date.now(), n: ROWS.length });
+    S.dl = { at: Date.now(), n: ROWS.length }; await saveS();
     showDownloaded();
   } catch (e) { toast("Download failed: " + e.message); }
   finally { $("btnZip").disabled = false; $("btnZip").textContent = "Download Excel + photos (zip)"; }
 };
 async function showDownloaded(){
-  const dl = await getMeta("downloadedAt");
+  const dl = S && S.dl;
   const box = $("dlDone");
   if (!dl || !dl.at) { box.classList.add("hidden"); return; }
   const stale = dl.n !== ROWS.length;
@@ -883,10 +915,15 @@ async function showDownloaded(){
   $("finishHint").textContent = stale ? "Download again before finishing." : "Done downloading. Finish to clear this PV from the phone.";
 }
 $("btnFinish").onclick = async () => {
-  const dl = await getMeta("downloadedAt");
+  const dl = S && S.dl;
   const txt = dl && dl.at ? `Last zip download at ${hhmm(dl.at)}. Everything for this PV will be removed from the phone.` : "You haven't downloaded the zip yet. Everything for this PV will be removed from the phone.";
   if (!(await ask("Finish this PV?", txt, "Finish and clear"))) return;
-  await clearAll(); ROWS = []; S = null; location.reload();
+  // remove only THIS PV and its photos; other PVs on the phone stay
+  for (const r of ROWS) await delRow(r.id);
+  PVS = PVS.filter(p => p.id !== S.id); await setMeta("pvs", PVS); await setMeta("current", null);
+  ROWS = []; S = null;
+  toast("PV finished and cleared");
+  await goHome();
 };
 
 /* test hook: run the reader on an image URL (used for desktop testing only) */
