@@ -271,7 +271,7 @@ h2{font-size:15px;margin:0 0 10px}
 <script>
 "use strict";
 /* ---------------------------------------------------------------- config */
-const APP_VERSION = "v1.8 (14-Nov-2026)";
+const APP_VERSION = "v1.9 (14-Nov-2026)";
 /* No client, location or area names live in this file (it is hosted publicly).
    Each phone remembers what its user typed: clients, their locations, the areas walked, and the firm name. */
 function lsGet(k){ try { return JSON.parse(localStorage.getItem(k) || "null"); } catch(e) { return null; } }
@@ -331,7 +331,17 @@ async function everyRow(){
 async function allRows(pvId){ const r = await everyRow(); return pvId == null ? r : r.filter(x => x.pv === pvId); }
 async function putRow(row){
   if (!db) { if (!row.id) row.id = mem.next++; const i = mem.rows.findIndex(r => r.id === row.id); i >= 0 ? mem.rows[i] = row : mem.rows.push(row); return row.id; }
-  const id = await tx("rows","readwrite", s => s.put(row)); if (!row.id) row.id = id; return row.id;
+  const id = await tx("rows","readwrite", s => s.put(row)); if (!row.id) row.id = id;
+  await refreshPhoto(row);
+  return row.id;
+}
+/* v1.9: Android Chrome - once a saved entry is re-saved, the photo copy the page already holds can no longer be read
+   (it showed blank until a reload). Re-read the entry after every save so the page always holds a fresh photo. */
+async function getRow(id){ if (!db) return mem.rows.find(r => r.id === id); try { return await tx("rows","readonly", s => s.get(id)); } catch(e){ return null; } }
+async function refreshPhoto(row){
+  if (!db || !row || !row.id) return;
+  const fresh = await getRow(row.id);
+  if (fresh && fresh.photoBlob) row.photoBlob = fresh.photoBlob;
 }
 async function delRow(id){ if (!db) { mem.rows = mem.rows.filter(r => r.id !== id); return; } await tx("rows","readwrite", s => s.delete(id)); }
 async function clearAll(){ if (!db) { mem.meta = {}; mem.rows = []; return; } await tx("rows","readwrite", s => s.clear()); await tx("meta","readwrite", s => s.clear()); }
@@ -785,7 +795,16 @@ function openSheet(p){
   if (p.crop) { $("cropImg").src = p.crop.toDataURL("image/jpeg", 0.8); $("cropImg").classList.remove("hidden"); }
   else $("cropImg").classList.add("hidden");
   $("photoBig").classList.add("hidden");
-  if (p.photoBlob) { $("photoBig").src = URL.createObjectURL(p.photoBlob); $("photoBig").classList.remove("hidden"); }
+  if (p.photoBlob) {
+    const im = $("photoBig"); let retried = false;
+    im.onerror = async () => {                                   // stale photo copy: fetch it again from the phone once
+      if (retried || !p.id) return; retried = true;
+      const row = ROWS.find(r => r.id === p.id); if (!row) return;
+      await refreshPhoto(row);
+      if (row.photoBlob && pending && pending.id === p.id) { pending.photoBlob = row.photoBlob; im.src = URL.createObjectURL(row.photoBlob); }
+    };
+    im.src = URL.createObjectURL(p.photoBlob); im.classList.remove("hidden");
+  }
   curType = p.type || "Scanned"; setType(curType);
   if (!p.id && !p.manual) setMsg("info", "Reading the plate…");
   $("sheet").classList.remove("hidden");
