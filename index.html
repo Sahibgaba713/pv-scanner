@@ -134,7 +134,7 @@ h2{font-size:15px;margin:0 0 10px}
       <button class="btn accent" id="btnStart" style="margin-top:16px">Start scanning</button>
       <p class="hint" id="startWarn"></p>
     </div>
-    <p class="hint" style="text-align:center">Photos and plate numbers stay on this phone until you download them.</p>
+    <p class="hint" style="text-align:center">Nothing is uploaded anywhere. Photos and plate numbers stay on this phone; Download saves the Excel / zip to the phone's Downloads folder (open the Files app → Downloads).</p>
   </div>
 </section>
 
@@ -221,8 +221,8 @@ h2{font-size:15px;margin:0 0 10px}
       <button data-v="No plate">No plate</button>
       <button data-v="Other">Trade / other</button>
     </div>
-    <label for="areaSel">Area</label>
-    <select id="areaSel"></select>
+    <label>Area <span class="hint" style="font-weight:400">(tap to change)</span></label>
+    <div class="chips" id="areaPick"></div>
     <div id="extra" class="hidden">
       <label for="vinIn">VIN / Chassis (optional)</label>
       <input id="vinIn" class="mono" autocapitalize="characters" spellcheck="false">
@@ -271,7 +271,7 @@ h2{font-size:15px;margin:0 0 10px}
 <script>
 "use strict";
 /* ---------------------------------------------------------------- config */
-const APP_VERSION = "v1.7 (14-Nov-2026)";
+const APP_VERSION = "v1.8 (14-Nov-2026)";
 /* No client, location or area names live in this file (it is hosted publicly).
    Each phone remembers what its user typed: clients, their locations, the areas walked, and the firm name. */
 function lsGet(k){ try { return JSON.parse(localStorage.getItem(k) || "null"); } catch(e) { return null; } }
@@ -728,7 +728,9 @@ $("areaNo").onclick = () => $("areaBox").classList.add("hidden");
 $("areaYes").onclick = async () => {
   const v = $("areaNew").value.trim(); if (!v) return;
   if (!S.areas.includes(v)) S.areas.push(v);
-  S.area = v; await saveS(); lsSet(areaKey(S.clientName, S.location), S.areas);
+  const forSheet = !$("sheet").classList.contains("hidden");      // added from the check / edit sheet
+  if (forSheet) { curArea = v; drawAreaPick(); } else S.area = v;
+  await saveS(); lsSet(areaKey(S.clientName, S.location), S.areas);
   $("areaBox").classList.add("hidden"); drawAreaBar();
 };
 $("areaNew").addEventListener("keydown", e => { if (e.key === "Enter") $("areaYes").click(); });
@@ -776,7 +778,7 @@ function openSheet(p){
   $("sheetTitle").textContent = p.id ? "Edit entry" : "Check the number";
   $("plateIn").value = p.plate || ""; $("vinIn").value = p.vin || ""; $("remIn").value = p.remark || "";
   $("extra").classList.toggle("hidden", !(p.vin || p.remark)); $("btnMore").classList.toggle("hidden", !!(p.vin || p.remark));
-  $("areaSel").innerHTML = S.areas.map(a => `<option ${a === (p.area || S.area) ? "selected" : ""}>${a}</option>`).join("");
+  curArea = p.area || S.area; drawAreaPick();
   $("btnDelete").classList.toggle("hidden", !p.id);
   $("btnCancel").textContent = p.id ? "Close" : "Retake";
   $("btnSave").textContent = "Save";
@@ -789,6 +791,18 @@ function openSheet(p){
   $("sheet").classList.remove("hidden");
 }
 function closeSheet(){ $("sheet").classList.add("hidden"); pending = null; }
+/* v1.8: area as tap-able chips in the check / edit sheet, with "+ New area" (the old dropdown was easy to miss) */
+let curArea = "";
+function drawAreaPick(){
+  const list = S.areas.includes(curArea) || !curArea ? S.areas : S.areas.concat([curArea]);
+  $("areaPick").innerHTML = list.map(a => `<span class="chip ${a === curArea ? "on" : ""}" data-a="${esc(a)}" role="button">${esc(a)}</span>`).join("")
+    + `<span class="chip" data-add="1" role="button" style="border:1px dashed var(--line)">+ New area</span>`;
+}
+$("areaPick").addEventListener("click", e => {
+  const c = e.target.closest(".chip"); if (!c) return;
+  if (c.dataset.add) { $("areaNew").value = ""; $("areaBox").classList.remove("hidden"); $("areaNew").focus(); return; }
+  curArea = c.dataset.a; drawAreaPick();
+});
 function fillRead(p){
   if (!p) { setMsg("warn", "Couldn't find a plate in the box. Type it, or Retake closer and straighter."); $("plateIn").focus(); return; }
   pending.raw = p.raw;
@@ -833,7 +847,7 @@ $("btnSave").onclick = async () => {
   let plate = $("plateIn").value.toUpperCase().trim().replace(/\s+/g, curType === "Scanned" ? "" : " ");
   if (curType === "No plate" && !plate) plate = "NO NUMBER PLATE";
   if (!plate) { setMsg("bad", "Enter the vehicle number first."); return; }
-  const area = $("areaSel").value;
+  const area = curArea || S.area;
   $("btnSave").disabled = true;
   try {
     let row;
@@ -955,7 +969,7 @@ async function showDownloaded(){
   const stale = dl.n !== ROWS.length;
   box.className = "msg " + (stale ? "warn" : "ok");
   box.textContent = stale ? `Downloaded at ${hhmm(dl.at)} with ${dl.n} vehicles, but the list has changed since (${ROWS.length} now). Download again.`
-                          : `✓ Downloaded at ${hhmm(dl.at)} (${dl.n} vehicles). Check the zip is in the phone's Downloads, then Finish.`;
+                          : `✓ Downloaded at ${hhmm(dl.at)} (${dl.n} vehicles). Check the zip is in Files → Downloads ("Open RO PV …zip"), then Finish.`;
   $("finishHint").textContent = stale ? "Download again before finishing." : "Done downloading. Finish to clear this PV from the phone.";
 }
 $("btnFinish").onclick = async () => {
