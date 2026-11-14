@@ -271,7 +271,7 @@ h2{font-size:15px;margin:0 0 10px}
 <script>
 "use strict";
 /* ---------------------------------------------------------------- config */
-const APP_VERSION = "v1.6 (14-Nov-2026)";
+const APP_VERSION = "v1.7 (14-Nov-2026)";
 /* No client, location or area names live in this file (it is hosted publicly).
    Each phone remembers what its user typed: clients, their locations, the areas walked, and the firm name. */
 function lsGet(k){ try { return JSON.parse(localStorage.getItem(k) || "null"); } catch(e) { return null; } }
@@ -643,8 +643,8 @@ function getFpo(){
     if (!window.ort) throw new Error("plate reader library did not load");
     ort.env.wasm.numThreads = 1;
     setStatus("Getting the plate reader ready (first time about 4 MB)…");
-    fpoSession = await ort.InferenceSession.create(new URL("lang/fpo_xs.onnx", location.href).href, { executionProviders: ["wasm"] });
-    READER = "fast-plate-ocr XS";
+    fpoSession = await ort.InferenceSession.create(new URL("lang/fpo_xs.onnx?v=1.7", location.href).href, { executionProviders: ["wasm"] });
+    READER = "fast-plate-ocr XS (India-tuned)";
     setStatus("Reader ready (fast-plate-ocr). Point at a plate and tap the white button.");
     return fpoSession;
   })().catch(e => { fpoReady = null; throw e; });
