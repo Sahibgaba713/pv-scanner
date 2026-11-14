@@ -103,7 +103,7 @@ h2{font-size:15px;margin:0 0 10px}
 
 <!-- ================= SETUP ================= -->
 <section id="setup">
-  <header class="bar"><h1>Open RO PV Scanner<span class="sub" id="firmSub">Vehicle physical verification</span></h1></header>
+  <header class="bar"><h1>Open RO PV Scanner<span class="sub" id="firmSub">Vehicle physical verification</span></h1><span id="verTag" style="margin-left:auto;font-size:12px;opacity:.7"></span></header>
   <div class="wrap">
     <div id="pvListCard" class="hidden">
       <h2 style="margin:4px 0 10px">PVs on this phone</h2>
@@ -271,7 +271,8 @@ h2{font-size:15px;margin:0 0 10px}
 <script>
 "use strict";
 /* ---------------------------------------------------------------- config */
-const APP_VERSION = "v1.9 (14-Nov-2026)";
+const APP_VERSION = "v1.10 (14-Nov-2026)";
+document.getElementById("verTag").textContent = APP_VERSION.split(" ")[0];
 /* No client, location or area names live in this file (it is hosted publicly).
    Each phone remembers what its user typed: clients, their locations, the areas walked, and the firm name. */
 function lsGet(k){ try { return JSON.parse(localStorage.getItem(k) || "null"); } catch(e) { return null; } }
@@ -331,12 +332,18 @@ async function everyRow(){
 async function allRows(pvId){ const r = await everyRow(); return pvId == null ? r : r.filter(x => x.pv === pvId); }
 async function putRow(row){
   if (!db) { if (!row.id) row.id = mem.next++; const i = mem.rows.findIndex(r => r.id === row.id); i >= 0 ? mem.rows[i] = row : mem.rows.push(row); return row.id; }
+  await detachPhoto(row);
   const id = await tx("rows","readwrite", s => s.put(row)); if (!row.id) row.id = id;
-  await refreshPhoto(row);
   return row.id;
 }
-/* v1.9: Android Chrome - once a saved entry is re-saved, the photo copy the page already holds can no longer be read
-   (it showed blank until a reload). Re-read the entry after every save so the page always holds a fresh photo. */
+/* v1.10: iPhone (WebKit) - once a saved entry is re-saved, the photo the page read from storage can no longer be read,
+   and re-reading it gives the same dead copy until a reload. So before every save, copy the photo bytes into memory
+   (while they are still readable) and keep that in-memory copy; storage gets its own copy of it. */
+async function detachPhoto(row){
+  const b = row && row.photoBlob; if (!b) return;
+  try { row.photoBlob = new Blob([await b.arrayBuffer()], { type: b.type || "image/jpeg" }); }
+  catch (e) { const fresh = row.id ? await getRow(row.id) : null; if (fresh && fresh.photoBlob) try { row.photoBlob = new Blob([await fresh.photoBlob.arrayBuffer()], { type: "image/jpeg" }); } catch (e2) {} }
+}
 async function getRow(id){ if (!db) return mem.rows.find(r => r.id === id); try { return await tx("rows","readonly", s => s.get(id)); } catch(e){ return null; } }
 async function refreshPhoto(row){
   if (!db || !row || !row.id) return;
