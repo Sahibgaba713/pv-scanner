@@ -9,7 +9,7 @@
   var REG_SHAPE = /^([A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}|\d{2}BH\d{4}[A-Z]{1,2}|T\d{4}[A-Z]{2}\d{4}[A-Z]{0,2})$/;
 
   var STATES = ("AN AP AR AS BR CG CH DD DL DN GA GJ HP HR JH JK KA KL LA LD MH ML MN MP MZ " +
-                "NL OD OR PB PY RJ SK TN TR TS UK UA UP WB").split(" ");
+                "NL OD OR PB PY RJ SK TG TN TR TS UK UA UP WB").split(" ");
 
   // OCR look-alikes
   var TO_DIGIT = { O: "0", D: "0", Q: "0", U: "0", I: "1", L: "1", J: "1", T: "7", Z: "2", S: "5",

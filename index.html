@@ -105,6 +105,8 @@ h2{font-size:15px;margin:0 0 10px}
 <section id="setup">
   <header class="bar"><h1>Open RO PV Scanner<span class="sub" id="firmSub">Vehicle physical verification</span></h1><span id="verTag" style="margin-left:auto;font-size:12px;opacity:.7"></span></header>
   <div class="wrap">
+    <div class="msg bad hidden" id="storeMsg"></div>
+    <div class="msg info" id="readyMsg">Getting the plate reader ready…</div>
     <div id="pvListCard" class="hidden">
       <h2 style="margin:4px 0 10px">PVs on this phone</h2>
       <div id="pvList"></div>
@@ -134,7 +136,12 @@ h2{font-size:15px;margin:0 0 10px}
       <button class="btn accent" id="btnStart" style="margin-top:16px">Start scanning</button>
       <p class="hint" id="startWarn"></p>
     </div>
-    <p class="hint" style="text-align:center">Nothing is uploaded anywhere. Photos and plate numbers stay on this phone; Download saves the Excel / zip to the phone's Downloads folder (open the Files app → Downloads).</p>
+    <div id="finishedCard" class="hidden" style="margin-top:14px">
+      <h2 style="margin:4px 0 6px">Recently finished</h2>
+      <p class="hint" style="margin-top:0">Kept for 7 days in case the download went wrong, then removed automatically.</p>
+      <div id="finishedList"></div>
+    </div>
+    <p class="hint" style="text-align:center">This page sends nothing to any server. Photos and plate numbers stay on this phone until you download them. Download saves the zip to Files → Downloads; on an iPhone that folder is often in iCloud Drive, so move the zip to the laptop and then delete it from the phone.</p>
   </div>
 </section>
 
@@ -193,13 +200,17 @@ h2{font-size:15px;margin:0 0 10px}
       <button class="btn accent" id="btnZip">Download Excel + photos (zip)</button>
       <button class="btn ghost" id="btnXlsx" style="margin-top:8px">Excel only</button>
       <div class="msg ok hidden" id="dlDone"></div>
+      <label id="dlCheckWrap" class="hidden" style="display:flex;gap:10px;align-items:flex-start;font-weight:500;margin-top:10px">
+        <input type="checkbox" id="dlCheck" style="width:22px;height:22px;flex:0 0 auto;margin-top:1px">
+        <span>I opened Files → Downloads and the zip is there</span>
+      </label>
       <p class="hint">Send the zip to the laptop, unzip it into the location's <b>Data</b> folder of Open RO PV v2 and run the tool as usual.</p>
       <p class="hint" id="dlInfo"></p>
     </div>
     <div class="card">
       <h2>3. Finish</h2>
-      <p class="hint" style="margin-top:0" id="finishHint">Download first. Finishing clears this PV from the phone so the next PV starts clean.</p>
-      <button class="btn danger" id="btnFinish" style="margin-top:10px">Finish and clear this PV</button>
+      <p class="hint" style="margin-top:0" id="finishHint">Download first. Finishing moves this PV to "Recently finished" on the home page, where it is kept for 7 days.</p>
+      <button class="btn danger" id="btnFinish" style="margin-top:10px">Finish this PV</button>
     </div>
     <h2 style="margin:18px 0 0">All vehicles</h2>
     <div id="groups"></div>
@@ -235,6 +246,7 @@ h2{font-size:15px;margin:0 0 10px}
       <button class="btn ghost" id="btnCancel">Retake</button>
       <button class="btn accent" id="btnSave">Save</button>
     </div>
+    <button class="btn ghost hidden" id="btnSaveDup" style="margin-top:8px;padding:8px;font-size:14px">Save as a second entry</button>
     <button class="btn danger hidden" id="btnDelete" style="margin-top:10px">Delete this entry</button>
   </div>
 </div>
@@ -263,15 +275,16 @@ h2{font-size:15px;margin:0 0 10px}
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<!-- v1.11: libraries are kept in this site (lib/) and cached on the phone by sw.js, so the page works with no signal -->
+<script src="lib/ort.min.js"></script>
+<script src="lib/tesseract.min.js"></script>
+<script src="lib/xlsx.full.min.js"></script>
+<script src="lib/jszip.min.js"></script>
 <script src="plate.js"></script>
 <script>
 "use strict";
 /* ---------------------------------------------------------------- config */
-const APP_VERSION = "v1.10 (14-Nov-2026)";
+const APP_VERSION = "v1.11 (14-Nov-2026)";
 document.getElementById("verTag").textContent = APP_VERSION.split(" ")[0];
 /* No client, location or area names live in this file (it is hosted publicly).
    Each phone remembers what its user typed: clients, their locations, the areas walked, and the firm name. */
@@ -287,6 +300,9 @@ const $ = id => document.getElementById(id);
 const pad = n => String(n).padStart(2, "0");
 function ddmmyyyy(iso){ const [y,m,d] = iso.split("-"); return `${d}-${m}-${y}`; }
 function hhmm(t){ const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function isoDate(t){ const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+// v1.11: names used in file names - drop characters a phone or Windows cannot use (a "/" broke the zip layout)
+function fname(s){ return String(s).replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim(); }
 function show(id){ ["setup","scan","list"].forEach(s => $(s).classList.toggle("hidden", s !== id)); window.scrollTo(0,0); }
 function toast(t){ const e = document.createElement("div"); e.className = "toast"; e.textContent = t; document.body.appendChild(e); setTimeout(() => e.remove(), 1400); }
 function safe(s){ return String(s).replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
@@ -318,12 +334,19 @@ function openDB(){
 const mem = { meta: {}, rows: [] , next: 1 };   // fallback when IndexedDB is blocked
 function tx(store, mode, fn){
   return new Promise((res, rej) => {
-    try { const t = db.transaction(store, mode); const r = fn(t.objectStore(store)); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); }
+    try { const t = db.transaction(store, mode); const r = fn(t.objectStore(store)); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error);
+          t.onabort = () => rej(t.error || new Error("the phone's storage is full or blocked")); }   // v1.11: a full phone aborts - never hang
     catch (e) { rej(e); }
   });
 }
+/* v1.11: say it loudly when the phone cannot keep data (private tab, storage blocked, phone full) */
+function storeProblem(text){ const m = $("storeMsg"); m.textContent = text; m.classList.remove("hidden"); }
 async function getMeta(k){ if (!db) return mem.meta[k]; try { return await tx("meta","readonly", s => s.get(k)); } catch(e){ return mem.meta[k]; } }
-async function setMeta(k, v){ if (!db) { mem.meta[k] = v; return; } try { await tx("meta","readwrite", s => s.put(v, k)); } catch(e){ mem.meta[k] = v; } }
+async function setMeta(k, v){
+  if (!db) { mem.meta[k] = v; return; }
+  try { await tx("meta","readwrite", s => s.put(v, k)); }
+  catch(e){ mem.meta[k] = v; storeProblem("Couldn't save on this phone (" + e.message + "). Free up space, then download what you have."); throw e; }
+}
 async function everyRow(){
   if (!db) return mem.rows.slice();
   try { const r = await tx("rows","readonly", s => s.getAll()); return (r || []).sort((a,b) => a.id - b.id); } catch(e){ return mem.rows.slice(); }
@@ -365,15 +388,26 @@ async function saveS(){
 async function openPv(id){
   S = PVS.find(p => p.id === id) || null;
   ROWS = S ? await allRows(S.id) : [];
-  if (S) await setMeta("current", S.id);
+  if (S) await setMeta("current", S.id).catch(() => {});
 }
 async function goHome(){ stopCamera(); fillClients(); $("startWarn").textContent = ""; await renderHome(); show("setup"); }
+const KEEP_DAYS = 7;
 async function renderHome(){
   const all = await everyRow(), count = {};
   all.forEach(r => { count[r.pv] = (count[r.pv] || 0) + 1; });
-  $("pvListCard").classList.toggle("hidden", !PVS.length);
-  $("newTitle").textContent = PVS.length ? "Start another PV" : "Start a new PV";
-  $("pvList").innerHTML = PVS.slice().sort((a, b) => b.started - a.started).map(p => `
+  const open = PVS.filter(p => !p.finishedAt), done = PVS.filter(p => p.finishedAt);
+  $("pvListCard").classList.toggle("hidden", !open.length);
+  $("newTitle").textContent = open.length ? "Start another PV" : "Start a new PV";
+  // v1.11: Finish no longer deletes - finished PVs wait here for 7 days and can be restored
+  $("finishedCard").classList.toggle("hidden", !done.length);
+  $("finishedList").innerHTML = done.slice().sort((a, b) => b.finishedAt - a.finishedAt).map(p => {
+    const left = Math.max(0, Math.ceil(KEEP_DAYS - (Date.now() - p.finishedAt) / 864e5));
+    return `<div class="card" style="margin-bottom:10px">
+      <div style="font-weight:650">${esc(p.location)} · PV ${ddmmyyyy(p.pvDate)}</div>
+      <div class="hint" style="margin:2px 0 10px">${count[p.id] || 0} vehicles · finished ${ddmmyyyy(isoDate(p.finishedAt))} ${hhmm(p.finishedAt)} · removed in ${left} day${left === 1 ? "" : "s"}${p.dl && p.dl.at ? "" : " · <b>never downloaded</b>"}</div>
+      <button class="btn ghost" data-restore="${p.id}">Restore</button>
+    </div>`; }).join("");
+  $("pvList").innerHTML = open.slice().sort((a, b) => b.started - a.started).map(p => `
     <div class="card" style="margin-bottom:10px">
       <div style="font-weight:650">${esc(p.location)} · PV ${ddmmyyyy(p.pvDate)}</div>
       <div class="hint" style="margin:2px 0 10px">${esc(p.clientLabel || p.clientName)} · ${count[p.id] || 0} vehicles · by ${esc(p.by)}${p.dl && p.dl.at ? " · downloaded " + hhmm(p.dl.at) : ""}</div>
@@ -442,12 +476,38 @@ $("pvList").addEventListener("click", async e => {
   await openPv(+b.dataset.id); if (!S) return;
   b.dataset.go === "scan" ? startScan() : openList();
 });
+$("finishedList").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-restore]"); if (!b) return;
+  const p = PVS.find(x => x.id === +b.dataset.restore); if (!p) return;
+  delete p.finishedAt; await setMeta("pvs", PVS); toast("PV restored"); await renderHome();
+});
 $("btnHome1").onclick = () => goHome();
 $("btnHome2").onclick = () => goHome();
 
+/* v1.11: get the plate reader ready on the home page, while there is still signal */
+async function warmReader(){
+  const m = $("readyMsg");
+  try {
+    await getFpo();
+    let offline = false;
+    if ("serviceWorker" in navigator) { try { await Promise.race([navigator.serviceWorker.ready, new Promise((_, r) => setTimeout(r, 15000))]); offline = true; } catch(e) {} }
+    m.className = "msg ok";
+    m.textContent = offline ? "✓ Reader ready - safe to go offline (basement)." : "✓ Reader ready. Keep this tab open while scanning.";
+  } catch (e) {
+    m.className = "msg warn";
+    m.textContent = "Plate reader not ready - " + (navigator.onLine ? "it will retry when you start scanning." : "no signal. Open this page once with signal before going down.");
+  }
+}
+
 async function boot(){
-  await openDB();
+  if (!(await openDB())) {
+    storeProblem("This browser won't let the page keep data (private tab or storage blocked). Open the page in normal Safari / Chrome, not a private tab. Scanning is switched off so nothing gets lost.");
+    $("btnStart").disabled = true;
+  }
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(e => console.warn("offline cache not available", e));
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e) {}
+  try { if (navigator.storage && navigator.storage.estimate) { const q = await navigator.storage.estimate(); if (q.quota && q.quota - q.usage < 300e6) storeProblem(`The phone is nearly full (about ${Math.round((q.quota - q.usage) / 1e6)} MB free for this page). Free up space before a long PV.`); } } catch(e) {}
+  warmReader();
   fillClients();
   $("firm").value = lsGet("pv_firm") || "";
   const d = new Date(); $("pvDate").value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
@@ -457,10 +517,17 @@ async function boot(){
   const old = await getMeta("session");
   if (old && !PVS.length) {
     old.id = old.started || Date.now(); PVS = [old];
-    for (const r of await everyRow()) if (r.pv == null) { r.pv = old.id; await putRow(r); }
-    await setMeta("pvs", PVS); await setMeta("current", old.id);
+    for (const r of await everyRow()) if (r.pv == null) { r.pv = old.id; await putRow(r).catch(() => {}); }
+    await setMeta("pvs", PVS).catch(() => {}); await setMeta("current", old.id).catch(() => {});
   }
   if (old) { try { await tx("meta","readwrite", s => s.delete("session")); } catch(e) {} }
+  // remove finished PVs older than 7 days, with their photos
+  const expired = PVS.filter(p => p.finishedAt && Date.now() - p.finishedAt > KEEP_DAYS * 864e5);
+  if (expired.length) {
+    const ids = new Set(expired.map(p => p.id));
+    for (const r of await everyRow()) if (ids.has(r.pv)) await delRow(r.id);
+    PVS = PVS.filter(p => !ids.has(p.id)); await setMeta("pvs", PVS).catch(() => {});
+  }
   await renderHome();
 }
 
@@ -653,13 +720,15 @@ async function ocrText(canvas, psm){
 /* ---- fast-plate-ocr XS (main reader since v1.4, 14-Nov-2026): plate-only model, 3.3 MB, runs on the phone
    with ONNX Runtime Web. Input: RGB 128x64 uint8 (NHWC). Output "plate": 10 slots x 37 classes (softmax). */
 const FPO = { w: 128, h: 64, slots: 10, alphabet: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_", pad: "_" };
+const ORT_WASM = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";   // same version as lib/ort.min.js; sw.js caches it
 let fpoSession = null, fpoReady = null;
 function getFpo(){
   if (fpoReady) return fpoReady;
   fpoReady = (async () => {
     if (!window.ort) throw new Error("plate reader library did not load");
     ort.env.wasm.numThreads = 1;
-    setStatus("Getting the plate reader ready (first time about 4 MB)…");
+    ort.env.wasm.wasmPaths = ORT_WASM;     // v1.11: 11 MB runtime from the CDN, kept on the phone by sw.js for offline use
+    setStatus("Getting the plate reader ready (first time about 15 MB, needs signal)…");
     fpoSession = await ort.InferenceSession.create(new URL("lang/fpo_xs.onnx?v=1.7", location.href).href, { executionProviders: ["wasm"] });
     READER = "fast-plate-ocr XS (India-tuned)";
     setStatus("Reader ready (fast-plate-ocr). Point at a plate and tap the white button.");
@@ -691,8 +760,8 @@ async function readPlate(crop, lines){
   try {
     const r = await fpoRead(crop);
     const p = Plate.parse(r.text);
-    if (p) { p.conf = Math.round(r.conf * 100); p.text = r.text; return p; }
-    return r.text ? { plate: r.text, raw: r.text, cost: 9, conf: Math.round(r.conf * 100) } : null;
+    if (p) { p.conf = Math.round(r.conf * 100); p.text = r.text; p.changed = p.plate !== Plate.clean(r.text); return p; }
+    return r.text ? { plate: r.text, raw: r.text, cost: 9, conf: Math.round(r.conf * 100), changed: true } : null;
   } catch (e) {
     console.warn("fast-plate-ocr unavailable, using Tesseract", e);
     return readPlateTess(crop, lines);
@@ -832,25 +901,49 @@ $("areaPick").addEventListener("click", e => {
 function fillRead(p){
   if (!p) { setMsg("warn", "Couldn't find a plate in the box. Type it, or Retake closer and straighter."); $("plateIn").focus(); return; }
   pending.raw = p.raw;
+  // v1.11: remember what the reader suggested and how sure it was (also goes to the Excel for the pilot)
+  pending.firstRead = p.plate; pending.conf = p.conf != null ? p.conf : null; pending.changed = !!p.changed;
   $("plateIn").value = p.plate;
   checkPlate();
+}
+/* v1.11: when to say "not sure". On the 55 held-out real plates this flagged 6 and caught all 4 wrong reads:
+   confidence under 80%, the plate rules had to change the reader's text, or the number doesn't end in 4 digits. */
+const SURE_CONF = 80;
+function notSure(v){
+  if (!pending || pending.firstRead == null || Plate.clean(pending.firstRead) !== v) return "";   // the user typed it - their number
+  if (pending.conf != null && pending.conf < SURE_CONF) return "the reader isn't sure";
+  if (pending.changed) return "the reader's text needed correcting";
+  if (!/^\d{2}BH/.test(v) && !/\d{4}$/.test(v)) return "it doesn't end in 4 digits - a character may be missing";
+  return "";
 }
 $("plateIn").addEventListener("input", () => { const pos = $("plateIn").selectionStart; $("plateIn").value = $("plateIn").value.toUpperCase().replace(/[^A-Z0-9 ]/g, ""); try { $("plateIn").setSelectionRange(pos, pos); } catch(e) {} checkPlate(); });
 function checkPlate(){
   if (!pending) return;
   const v = Plate.clean($("plateIn").value);
-  $("btnSave").textContent = "Save";
+  setDup(false);
   if (!v) { if ($("plateMsg").textContent !== "Reading the plate…") setMsg("info", "Type the vehicle number."); return; }
   const dup = ROWS.find(r => r.id !== pending.id && Plate.clean(r.plate) === v);
-  if (dup) { setMsg("bad", `Already saved: ${dup.area} at ${hhmm(dup.time)}. Save only if it really is a second entry.`); $("btnSave").textContent = "Save anyway"; return; }
+  if (dup && pending.id) { setMsg("warn", `Same number also saved: ${dup.area} at ${hhmm(dup.time)}. Delete one of them if it's the same car.`); return; }
+  if (dup) { setMsg("bad", `Already scanned: ${dup.area} at ${hhmm(dup.time)}.`); setDup(true); return; }
   if (curType !== "Scanned") { setMsg("info", `${curType} entry, saved as typed.`); return; }
   const rule = Plate.ruleProblem ? Plate.ruleProblem(v) : "";
+  const unsure = notSure(v);
   if (Plate.looksLikeReg(v) && rule) setMsg("bad", rule);
-  else if (Plate.looksLikeReg(v)) setMsg("ok", "Number looks valid. Check it against the plate, then Save.");
+  else if (Plate.looksLikeReg(v) && unsure) setMsg("warn", `Not sure - ${unsure}. Compare each character with the plate before saving.`);
+  else if (Plate.looksLikeReg(v)) setMsg("ok", "Looks like a plate number - still compare it with the plate, then Save.");
   else setMsg("warn", "Doesn't look like a normal plate number. Fix it, or pick Temporary / Trade above.");
 }
+/* v1.11: for a NEW scan of a car already in the list, the big button discards; saving it needs the small "second entry" button.
+   (Opening an existing entry keeps a normal Save, so its area or remark can still be fixed.) */
+let dupMode = false;
+function setDup(on){
+  dupMode = on;
+  $("btnSave").textContent = on ? "Discard - already scanned" : "Save";
+  $("btnSaveDup").classList.toggle("hidden", !on);
+}
 $("btnMore").onclick = () => { $("extra").classList.remove("hidden"); $("btnMore").classList.add("hidden"); };
-$("btnCancel").onclick = closeSheet;
+let retakes = 0;      // v1.11: retakes before a save (goes to the Excel for the pilot)
+$("btnCancel").onclick = () => { if (pending && !pending.id) retakes++; closeSheet(); };
 
 /* evidence photo: full frame, max 1280 px, caption strip with plate, area, time */
 function evidencePhoto(full, plate, area, time){
@@ -868,7 +961,13 @@ function evidencePhoto(full, plate, area, time){
   });
 }
 
-$("btnSave").onclick = async () => {
+$("btnSave").onclick = () => {
+  if (!pending) return;
+  if (dupMode) { const wasNew = !pending.id; closeSheet(); if (wasNew) { retakes = 0; toast("Not saved - already in the list"); } return; }
+  doSave();
+};
+$("btnSaveDup").onclick = () => doSave();
+async function doSave(){
   if (!pending) return;
   let plate = $("plateIn").value.toUpperCase().trim().replace(/\s+/g, curType === "Scanned" ? "" : " ");
   if (curType === "No plate" && !plate) plate = "NO NUMBER PLATE";
@@ -883,23 +982,25 @@ $("btnSave").onclick = async () => {
     } else {
       const time = Date.now();
       row = { pv: S.id, plate, area, type: curType, raw: pending.raw || "", vin: $("vinIn").value.trim().toUpperCase(), remark: $("remIn").value.trim(), time,
+              firstRead: pending.firstRead || "", conf: pending.conf != null ? pending.conf : "", retakes,
               photoBlob: await evidencePhoto(pending.full, plate, area, time) };
     }
     await putRow(row);
-    if (!pending.id) ROWS.push(row);
-    S.area = area; await saveS();
     const wasEdit = !!pending.id;
+    if (!wasEdit) { ROWS.push(row); S.area = area; retakes = 0; }   // v1.11: fixing an old entry no longer changes the scanning area
+    S.editedAt = Date.now();                                         // v1.11: lets the Download box spot any change since the last zip
+    await saveS();
     closeSheet();
     if (wasEdit) renderList(); else { drawAreaBar(); updateCount(); toast(`Saved ${plate}`); }
   } catch (e) {
     setMsg("bad", "Couldn't save on this phone: " + e.message);
   } finally { $("btnSave").disabled = false; }
-};
+}
 $("btnDelete").onclick = async () => {
   if (!pending || !pending.id) return;
   const id = pending.id;
   if (!(await ask("Delete this entry?", `${$("plateIn").value} will be removed from the list.`, "Delete"))) return;
-  await delRow(id); ROWS = ROWS.filter(r => r.id !== id); closeSheet(); renderList();
+  await delRow(id); ROWS = ROWS.filter(r => r.id !== id); S.editedAt = Date.now(); await saveS().catch(() => {}); closeSheet(); renderList();
 };
 
 /* ---------------------------------------------------------------- list */
@@ -919,10 +1020,10 @@ function renderList(){
   const areas = S.areas.concat([...new Set(ROWS.map(r => r.area))].filter(a => !S.areas.includes(a)));
   $("groups").innerHTML = areas.map(a => {
     const rs = ROWS.filter(r => r.area === a); if (!rs.length) return "";
-    return `<div class="grp"><h3><span>${a}</span><span>${rs.length}</span></h3>` + rs.map(r => {
+    return `<div class="grp"><h3><span>${esc(a)}</span><span>${rs.length}</span></h3>` + rs.map(r => {
       const dup = counts[Plate.clean(r.plate)] > 1, odd = bad(r);
-      return `<div class="item" data-id="${r.id}"><span class="p mono">${r.plate}</span>
-        ${r.type !== "Scanned" ? `<span class="tag m">${r.type}</span>` : ""}${dup ? `<span class="tag d">Duplicate</span>` : ""}${odd ? `<span class="tag d">Check</span>` : ""}
+      return `<div class="item" data-id="${r.id}"><span class="p mono">${esc(r.plate)}</span>
+        ${r.type !== "Scanned" ? `<span class="tag m">${esc(r.type)}</span>` : ""}${dup ? `<span class="tag d">Duplicate</span>` : ""}${odd ? `<span class="tag d">Check</span>` : ""}
         <span class="t">${hhmm(r.time)}</span></div>`;
     }).join("") + `</div>`;
   }).join("") || `<p class="hint" style="text-align:center">No vehicles yet.</p>`;
@@ -937,7 +1038,7 @@ $("groups").addEventListener("click", e => {
 
 /* ---------------------------------------------------------------- export */
 function photoName(r, i){ return `${i + 1}_${safe(r.plate)}_${safe(r.area)}_${hhmm(r.time).replace(":", "")}.jpg`; }
-function fileStem(){ const [y,m,d] = S.pvDate.split("-"); return `Vehicle found on ${d} ${MON[+m - 1]}'${y.slice(2)} - ${S.location}`; }
+function fileStem(){ const [y,m,d] = S.pvDate.split("-"); return fname(`Vehicle found on ${d} ${MON[+m - 1]}'${y.slice(2)} - ${S.location}`); }
 function buildWorkbook(withPhotos){
   const [y, m] = S.pvDate.split("-");
   const aoa = [
@@ -947,10 +1048,12 @@ function buildWorkbook(withPhotos){
     [],
     [`Open RO PV ${S.location} ${ddmmyyyy(S.pvDate)}`],
     [],
-    ["#", "Location", "Vehicle No", "VIN", "Entry", "Time", "Photo", "Remarks", "Read by scanner"]
+    ["#", "Location", "Vehicle No", "VIN", "Entry", "Time", "Photo", "Remarks", "Read by scanner", "Scanner suggested", "Confidence %", "Retakes"]
   ];
   const HEAD = aoa.length;
-  ROWS.forEach((r, i) => aoa.push([i + 1, r.area, r.plate, r.vin || "-", r.type, hhmm(r.time), withPhotos && r.photoBlob ? photoName(r, i) : "", r.remark || "", r.raw || ""]));
+  // v1.11: last three columns measure the reader in the pilot (suggested vs saved, how sure, retakes before saving)
+  ROWS.forEach((r, i) => aoa.push([i + 1, r.area, r.plate, r.vin || "-", r.type, hhmm(r.time), withPhotos && r.photoBlob ? photoName(r, i) : "", r.remark || "", r.raw || "",
+                                   r.firstRead || "", r.conf === "" || r.conf == null ? "" : r.conf, r.retakes == null ? "" : r.retakes]));
   aoa.push([]);
   aoa.push([`Scanned by ${S.by} with Open RO PV Scanner ${APP_VERSION}${READER ? " (" + READER + ")" : ""}. ${ROWS.length} vehicles.`]);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -959,7 +1062,7 @@ function buildWorkbook(withPhotos){
     const ref = XLSX.utils.encode_cell({ r: HEAD + i, c: 6 });
     ws[ref].l = { Target: "Photos/" + photoName(r, i), Tooltip: "Open photo" };
   });
-  ws["!cols"] = [{ wch: 5 }, { wch: 22 }, { wch: 16 }, { wch: 20 }, { wch: 11 }, { wch: 7 }, { wch: 34 }, { wch: 26 }, { wch: 16 }];
+  ws["!cols"] = [{ wch: 5 }, { wch: 22 }, { wch: 16 }, { wch: 20 }, { wch: 11 }, { wch: 7 }, { wch: 34 }, { wch: 26 }, { wch: 16 }, { wch: 17 }, { wch: 12 }, { wch: 8 }];
   ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Vehicle found");
@@ -967,7 +1070,7 @@ function buildWorkbook(withPhotos){
 }
 function download(blob, name){
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
-  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10 * 60000);   // v1.11: 10 min for the iPhone prompt
 }
 $("btnXlsx").onclick = () => {
   if (!ROWS.length) return toast("Nothing to download yet");
@@ -982,31 +1085,43 @@ $("btnZip").onclick = async () => {
     const ph = zip.folder("Photos");
     ROWS.forEach((r, i) => { if (r.photoBlob) ph.file(photoName(r, i), r.photoBlob); });
     const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
-    download(blob, `Open RO PV ${S.location} ${ddmmyyyy(S.pvDate)}.zip`);
-    S.dl = { at: Date.now(), n: ROWS.length }; await saveS();
+    const at = Date.now(), photos = ROWS.filter(r => r.photoBlob).length;
+    const name = fname(`Open RO PV ${S.location} ${ddmmyyyy(S.pvDate)} ${hhmm(at).replace(":", "")}`) + ".zip";   // time in the name: no "… 2.zip" mix-ups
+    download(blob, name);
+    S.dl = { at, n: ROWS.length, photos, name, ok: false }; await saveS();
     showDownloaded();
   } catch (e) { toast("Download failed: " + e.message); }
   finally { $("btnZip").disabled = false; $("btnZip").textContent = "Download Excel + photos (zip)"; }
 };
-async function showDownloaded(){
+/* v1.11: "downloaded" only after the user confirms the zip is in Files; any change after the zip makes it stale */
+function dlState(){
   const dl = S && S.dl;
-  const box = $("dlDone");
-  if (!dl || !dl.at) { box.classList.add("hidden"); return; }
-  const stale = dl.n !== ROWS.length;
-  box.className = "msg " + (stale ? "warn" : "ok");
-  box.textContent = stale ? `Downloaded at ${hhmm(dl.at)} with ${dl.n} vehicles, but the list has changed since (${ROWS.length} now). Download again.`
-                          : `✓ Downloaded at ${hhmm(dl.at)} (${dl.n} vehicles). Check the zip is in Files → Downloads ("Open RO PV …zip"), then Finish.`;
-  $("finishHint").textContent = stale ? "Download again before finishing." : "Done downloading. Finish to clear this PV from the phone.";
+  if (!dl || !dl.at) return "none";
+  if (dl.n !== ROWS.length || (S.editedAt && S.editedAt > dl.at)) return "stale";
+  return dl.ok ? "ok" : "started";
 }
+function showDownloaded(){
+  const dl = S && S.dl, st = dlState(), box = $("dlDone");
+  $("dlCheckWrap").classList.toggle("hidden", st !== "started" && st !== "ok");
+  $("dlCheck").checked = st === "ok";
+  if (st === "none") { box.classList.add("hidden"); $("finishHint").textContent = "Download first. Finishing moves this PV to \"Recently finished\" on the home page, where it is kept for 7 days."; return; }
+  box.className = "msg " + (st === "ok" ? "ok" : "warn");
+  box.textContent = st === "stale" ? `Zip from ${hhmm(dl.at)} is out of date - entries were added, changed or deleted since. Download again.`
+    : st === "started" ? `Download started at ${hhmm(dl.at)}: ${dl.n} vehicles, ${dl.photos != null ? dl.photos : "?"} photos${dl.name ? ` (${dl.name})` : ""}. Open Files → Downloads, check the zip is there, then tick the box below.`
+    : `✓ Zip confirmed in Files (${dl.n} vehicles, downloaded ${hhmm(dl.at)}).`;
+  $("finishHint").textContent = st === "ok" ? "Done. Finish moves this PV to \"Recently finished\" (kept 7 days)." : st === "stale" ? "Download again before finishing." : "Confirm the zip is in Files before finishing.";
+}
+$("dlCheck").onchange = async () => { if (S && S.dl) { S.dl.ok = $("dlCheck").checked; await saveS().catch(() => {}); showDownloaded(); } };
 $("btnFinish").onclick = async () => {
-  const dl = S && S.dl;
-  const txt = dl && dl.at ? `Last zip download at ${hhmm(dl.at)}. Everything for this PV will be removed from the phone.` : "You haven't downloaded the zip yet. Everything for this PV will be removed from the phone.";
-  if (!(await ask("Finish this PV?", txt, "Finish and clear"))) return;
-  // remove only THIS PV and its photos; other PVs on the phone stay
-  for (const r of ROWS) await delRow(r.id);
-  PVS = PVS.filter(p => p.id !== S.id); await setMeta("pvs", PVS); await setMeta("current", null);
+  const st = dlState();
+  if (st !== "ok") {
+    const why = st === "none" ? "You haven't downloaded the zip." : st === "stale" ? "The list changed after the last zip." : "You haven't confirmed the zip is in Files.";
+    if (!(await ask("Finish without a confirmed zip?", `${why} The PV will be kept for 7 days under "Recently finished" on the home page, where you can restore it.`, "Finish anyway"))) return;
+  }
+  // v1.11: nothing is deleted now - the PV is hidden and removed automatically after 7 days
+  S.finishedAt = Date.now(); await saveS().catch(() => {}); await setMeta("current", null).catch(() => {});
   ROWS = []; S = null;
-  toast("PV finished and cleared");
+  toast("PV finished - kept 7 days under Recently finished");
   await goHome();
 };
 
