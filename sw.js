@@ -1,7 +1,7 @@
-/* Open RO PV Scanner - offline cache (v1.12, 25-Nov-2026).
+/* Open RO PV Scanner - offline cache (v1.13, 25-Nov-2026).
    Keeps the page, the plate rules, the libraries and the plate reader on the phone after the first visit,
    so scanning works in a basement with no signal. Change CACHE whenever any of these files change. */
-const CACHE = "pvscan-v1.12";
+const CACHE = "pvscan-v1.13";
 const ORT = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";   // the 11 MB reader runtime (too big to keep in the repo)
 const FILES = [
   "./", "index.html", "plate.js",

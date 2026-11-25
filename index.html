@@ -284,7 +284,7 @@ h2{font-size:15px;margin:0 0 10px}
 <script>
 "use strict";
 /* ---------------------------------------------------------------- config */
-const APP_VERSION = "v1.12 (25-Nov-2026)";
+const APP_VERSION = "v1.13 (25-Nov-2026)";
 document.getElementById("verTag").textContent = APP_VERSION.split(" ")[0];
 /* No client, location or area names live in this file (it is hosted publicly).
    Each phone remembers what its user typed: clients, their locations, the areas walked, and the firm name. */
@@ -495,7 +495,7 @@ $("finishedList").addEventListener("click", async e => {
   const p = PVS.find(x => x.id === +b.dataset.purge); if (!p) return;
   const n = (await everyRow()).filter(r => r.pv === p.id).length;
   const warn = p.dl && p.dl.at ? "" : " This PV was NEVER downloaded - its list and photos will be lost.";
-  if (!(await ask("Delete this PV for good?", `${p.location} · PV ${ddmmyyyy(p.pvDate)} · ${n} vehicles and their photos will be removed from this phone. This cannot be undone.${warn}`, "Delete for good"))) return;
+  if (!(await ask("Delete this PV?", `${p.location} · PV ${ddmmyyyy(p.pvDate)} · ${n} vehicles and their photos will be removed from this phone. This cannot be undone.${warn}`, "Confirm delete"))) return;
   try { await purgePvs(new Set([p.id])); toast("PV deleted"); }
   catch (err) { storeProblem("Could not delete the PV: " + (err && err.message || err)); }
   await renderHome();
