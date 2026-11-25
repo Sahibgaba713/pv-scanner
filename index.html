@@ -284,7 +284,7 @@ h2{font-size:15px;margin:0 0 10px}
 <script>
 "use strict";
 /* ---------------------------------------------------------------- config */
-const APP_VERSION = "v1.11 (14-Nov-2026)";
+const APP_VERSION = "v1.12 (25-Nov-2026)";
 document.getElementById("verTag").textContent = APP_VERSION.split(" ")[0];
 /* No client, location or area names live in this file (it is hosted publicly).
    Each phone remembers what its user typed: clients, their locations, the areas walked, and the firm name. */
@@ -405,7 +405,10 @@ async function renderHome(){
     return `<div class="card" style="margin-bottom:10px">
       <div style="font-weight:650">${esc(p.location)} · PV ${ddmmyyyy(p.pvDate)}</div>
       <div class="hint" style="margin:2px 0 10px">${count[p.id] || 0} vehicles · finished ${ddmmyyyy(isoDate(p.finishedAt))} ${hhmm(p.finishedAt)} · removed in ${left} day${left === 1 ? "" : "s"}${p.dl && p.dl.at ? "" : " · <b>never downloaded</b>"}</div>
-      <button class="btn ghost" data-restore="${p.id}">Restore</button>
+      <div class="row">
+        <button class="btn ghost" data-restore="${p.id}">Restore</button>
+        <button class="btn danger" data-purge="${p.id}">Delete now</button>
+      </div>
     </div>`; }).join("");
   $("pvList").innerHTML = open.slice().sort((a, b) => b.started - a.started).map(p => `
     <div class="card" style="margin-bottom:10px">
@@ -476,10 +479,26 @@ $("pvList").addEventListener("click", async e => {
   await openPv(+b.dataset.id); if (!S) return;
   b.dataset.go === "scan" ? startScan() : openList();
 });
+/* remove PVs and all their entries + photos from the phone for good */
+async function purgePvs(ids){
+  for (const r of await everyRow()) if (ids.has(r.pv)) await delRow(r.id);
+  PVS = PVS.filter(p => !ids.has(p.id)); await setMeta("pvs", PVS);
+}
 $("finishedList").addEventListener("click", async e => {
-  const b = e.target.closest("button[data-restore]"); if (!b) return;
-  const p = PVS.find(x => x.id === +b.dataset.restore); if (!p) return;
-  delete p.finishedAt; await setMeta("pvs", PVS); toast("PV restored"); await renderHome();
+  const b = e.target.closest("button[data-restore],button[data-purge]"); if (!b) return;
+  if (b.dataset.restore) {
+    const p = PVS.find(x => x.id === +b.dataset.restore); if (!p) return;
+    delete p.finishedAt; await setMeta("pvs", PVS); toast("PV restored"); await renderHome();
+    return;
+  }
+  // v1.12: delete a finished PV now, instead of waiting 7 days (25-Nov-2026)
+  const p = PVS.find(x => x.id === +b.dataset.purge); if (!p) return;
+  const n = (await everyRow()).filter(r => r.pv === p.id).length;
+  const warn = p.dl && p.dl.at ? "" : " This PV was NEVER downloaded - its list and photos will be lost.";
+  if (!(await ask("Delete this PV for good?", `${p.location} · PV ${ddmmyyyy(p.pvDate)} · ${n} vehicles and their photos will be removed from this phone. This cannot be undone.${warn}`, "Delete for good"))) return;
+  try { await purgePvs(new Set([p.id])); toast("PV deleted"); }
+  catch (err) { storeProblem("Could not delete the PV: " + (err && err.message || err)); }
+  await renderHome();
 });
 $("btnHome1").onclick = () => goHome();
 $("btnHome2").onclick = () => goHome();
@@ -523,11 +542,7 @@ async function boot(){
   if (old) { try { await tx("meta","readwrite", s => s.delete("session")); } catch(e) {} }
   // remove finished PVs older than 7 days, with their photos
   const expired = PVS.filter(p => p.finishedAt && Date.now() - p.finishedAt > KEEP_DAYS * 864e5);
-  if (expired.length) {
-    const ids = new Set(expired.map(p => p.id));
-    for (const r of await everyRow()) if (ids.has(r.pv)) await delRow(r.id);
-    PVS = PVS.filter(p => !ids.has(p.id)); await setMeta("pvs", PVS).catch(() => {});
-  }
+  if (expired.length) await purgePvs(new Set(expired.map(p => p.id))).catch(() => {});
   await renderHome();
 }
 
